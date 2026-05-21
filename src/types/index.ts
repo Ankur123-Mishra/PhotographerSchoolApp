@@ -16,14 +16,55 @@ export interface ClassItem {
   studentCount?: number;
 }
 
+/** Dynamic ID card fields from API – keys may vary per school/template */
+export type StudentCardFields = Record<string, string | number | boolean | null | undefined>;
+
+/** Body for POST api/school/students (multipart/form-data) */
+export interface StudentCreatePayload extends StudentUpdatePayload {
+  classId: string;
+  /** Local file URI for student photo — sent as form field `photo`. */
+  photoUri?: string;
+  /** Local file URI for house logo — sent as form field `housePhoto`. */
+  housePhotoUri?: string;
+}
+
+/** Body for PUT api/school/students/:studentId */
+export interface StudentUpdatePayload {
+  studentName: string;
+  admissionNo: string;
+  rollNo: string;
+  fatherName: string;
+  motherName: string;
+  dob: string;
+  mobile: string;
+  address: string;
+  gender: string;
+  bloodGroup: string;
+  house: string;
+  photoNo: string;
+  extraFields: Record<string, string>;
+}
+
 export interface Student {
   id: string;
   name: string;
+  /** Filled card values for display (non-empty only). */
+  card?: StudentCardFields;
+  /** All template field keys from API card object (includes empty placeholders). */
+  cardTemplate?: StudentCardFields;
   uniqueCode?: string;
   rollNo: string;
   admissionNo?: string;
   mobile?: string;
   address?: string;
+  fatherName?: string;
+  motherName?: string;
+  dob?: string;
+  gender?: string;
+  bloodGroup?: string;
+  house?: string;
+  photoNo?: string;
+  extraFields?: Record<string, string>;
   className: string;
   classId: string;
   sectionName?: string;

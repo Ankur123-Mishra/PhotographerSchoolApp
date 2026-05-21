@@ -44,7 +44,7 @@ export const colors = {
 
 export const spacing = {
   xs: 4,
-  sm: 8,
+  sm: 7,
   md: 12,
   lg: 16,
   xl: 20,

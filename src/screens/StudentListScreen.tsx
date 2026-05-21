@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useLayoutEffect, useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -6,6 +6,7 @@ import {
   RefreshControl,
   StyleSheet,
   TouchableOpacity,
+  Alert,
 } from 'react-native';
 import Ionicons from 'react-native-vector-icons/Ionicons';
 import { useFocusEffect, useNavigation, useRoute, RouteProp } from '@react-navigation/native';
@@ -14,9 +15,11 @@ import { useStudents } from '../context/StudentContext';
 import StudentCard from '../components/StudentCard';
 import SearchBar from '../components/SearchBar';
 import FilterModal from '../components/FilterModal';
+import StudentAddModal from '../components/StudentAddModal';
 import Loader from '../components/Loader';
 import type { MainStackParamList } from '../navigation/types';
-import type { Student, StudentStatus } from '../types';
+import type { Student, StudentStatus, StudentCreatePayload } from '../types';
+import { createStudent, resolveAddStudentFieldKeys } from '../Services/api';
 import { colors, spacing, radius, typography } from '../theme/colors';
 
 type Nav = NativeStackNavigationProp<MainStackParamList, 'StudentList'>;
@@ -36,6 +39,9 @@ export default function StudentListScreen() {
   const [searchQuery, setSearchQuery] = useState('');
   const [filterStatus, setFilterStatus] = useState<StudentStatus | 'all'>('all');
   const [filterVisible, setFilterVisible] = useState(false);
+  const [addVisible, setAddVisible] = useState(false);
+  const [addFieldKeys, setAddFieldKeys] = useState<string[]>([]);
+  const [addFieldsLoading, setAddFieldsLoading] = useState(false);
 
   useFocusEffect(
     useCallback(() => {
@@ -57,13 +63,51 @@ export default function StudentListScreen() {
 
   const onRefresh = useCallback(() => {
     loadStudentsByClass(classId);
-  
     refreshDashboard();
   }, [classId, loadStudentsByClass, refreshDashboard]);
 
   const onStudentPress = (student: Student) => {
     navigation.navigate('StudentDetail', { studentId: student.id });
   };
+
+  const onOpenAddStudent = useCallback(async () => {
+    if (addFieldsLoading) return;
+    setAddFieldsLoading(true);
+    try {
+      const keys = await resolveAddStudentFieldKeys(students);
+      setAddFieldKeys(keys);
+      setAddVisible(true);
+    } catch (e) {
+      Alert.alert('Error', (e as Error).message || 'Could not load form fields');
+    } finally {
+      setAddFieldsLoading(false);
+    }
+  }, [students, addFieldsLoading]);
+
+  const onAddStudent = useCallback(
+    async (payload: StudentCreatePayload) => {
+      await createStudent(payload);
+      await loadStudentsByClass(classId);
+      refreshDashboard();
+      Alert.alert('Success', 'Student added successfully.');
+    },
+    [classId, loadStudentsByClass, refreshDashboard],
+  );
+
+  useLayoutEffect(() => {
+    navigation.setOptions({
+      headerRight: () => (
+        <TouchableOpacity
+          onPress={onOpenAddStudent}
+          style={{ marginRight: spacing.sm }}
+          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+          activeOpacity={0.7}
+        >
+          <Ionicons name="person-add-outline" size={24} color={colors.primary} />
+        </TouchableOpacity>
+      ),
+    });
+  }, [navigation, onOpenAddStudent]);
 
   if (loading && students.length === 0) {
     return <Loader message="Loading students..." />;
@@ -105,24 +149,28 @@ export default function StudentListScreen() {
             <Text style={styles.emptyText}>No students found</Text>
           </View>
         }
-        renderItem={({ item }) => 
-        {
-          console.log("student data",item);
-          return (
+        renderItem={({ item }) => (
           <StudentCard
             studentName={item.name}
-            className={item.className}
+            className={item.className || className}
             rollNo={item.rollNo}
             status={item.status}
             onPress={() => onStudentPress(item)}
           />
-        )}}
+        )}
       />
       <FilterModal
         visible={filterVisible}
         selected={filterStatus}
         onSelect={setFilterStatus}
         onClose={() => setFilterVisible(false)}
+      />
+      <StudentAddModal
+        visible={addVisible}
+        fieldKeys={addFieldKeys}
+        classId={classId}
+        onClose={() => setAddVisible(false)}
+        onSubmit={onAddStudent}
       />
     </View>
   );

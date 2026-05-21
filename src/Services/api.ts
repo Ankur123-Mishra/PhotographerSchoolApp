@@ -4,13 +4,17 @@ import {
   getSchoolClasses,
   getSchoolDashboard,
   getSchoolStudents,
+  getSchoolStudentsGlobalSearch,
   getSchoolStudentDetail,
+  getSchoolPreview,
   requestSchoolCorrection,
   getSchoolCorrections,
   approveSchoolPreview,
   rejectSchoolPreview,
   resolveSchoolCorrection,
   rejectSchoolCorrection,
+  updateSchoolStudent,
+  createSchoolStudent,
 } from './mobile-api';
 import { mobile_siteConfig } from './mobile-siteConfig';
 
@@ -58,7 +62,21 @@ export async function apiPost<T>(url: string, body?: object): Promise<T> {
 
 // --- Mock data helpers for development (no backend) ---
 
-import type { CorrectionChange, CorrectionItem, DashboardStats, ClassItem, Student, StudentStatus } from '../types';
+import type {
+  CorrectionChange,
+  CorrectionItem,
+  DashboardStats,
+  ClassItem,
+  Student,
+  StudentCreatePayload,
+  StudentStatus,
+  StudentUpdatePayload,
+} from '../types';
+import {
+  extractTemplateDataFields,
+  getAddStudentFieldKeys,
+  mergeTemplateFieldKeys,
+} from '../utils/cardFields';
 import { sortClassItems } from '../utils/classSort';
 
 let mockStudents: Student[] = [];
@@ -212,6 +230,66 @@ function mapApiStatus(status: string): StudentStatus {
   return API_STATUS_TO_APP[status] ?? 'pending';
 }
 
+type ApiGlobalSearchStudent = {
+  _id: string;
+  schoolId: string | { _id: string; schoolName: string };
+  classId:
+    | string
+    | { _id: string; className: string; section?: string; sectionProvided?: boolean };
+  rollNo?: string;
+  studentName: string;
+  admissionNo?: string;
+  mobile?: string;
+  address?: string;
+  photoNo?: string;
+  photoUrl?: string;
+  status?: string;
+  [key: string]: unknown;
+};
+
+function mapApiStudentListItem(s: ApiGlobalSearchStudent): Student {
+  const schoolIdObj = s.schoolId && typeof s.schoolId === 'object' ? s.schoolId : null;
+  const classIdObj = s.classId && typeof s.classId === 'object' ? s.classId : null;
+  return {
+    id: s._id,
+    name: s.studentName,
+    admissionNo: s.admissionNo,
+    mobile: s.mobile,
+    address: s.address,
+    photoNo: s.photoNo,
+    rollNo: s.rollNo ?? '',
+    className: classIdObj
+      ? `${classIdObj.className}${classIdObj.section ? ` - ${classIdObj.section}` : ''}`
+      : '',
+    classId: classIdObj ? classIdObj._id : (s.classId as string),
+    sectionName: classIdObj?.section,
+    schoolId: schoolIdObj ? schoolIdObj._id : (s.schoolId as string),
+    schoolName: schoolIdObj ? schoolIdObj.schoolName : '',
+    status: mapApiStatus(s.status ?? 'pending'),
+    photoUri: getFullPhotoUrl(s.photoUrl),
+  };
+}
+
+/** School-wide student search by name, mobile, or photo number. */
+export async function searchStudentsGlobal(query: string): Promise<Student[]> {
+  const q = query.trim();
+  if (!q) return [];
+  try {
+    const res = (await getSchoolStudentsGlobalSearch(q)) as { students?: ApiGlobalSearchStudent[] };
+    const list = res?.students ?? [];
+    return list.map(mapApiStudentListItem);
+  } catch {
+    ensureMockData();
+    const lower = q.toLowerCase();
+    return getMockStudents().filter(
+      (s) =>
+        s.name.toLowerCase().includes(lower) ||
+        (s.mobile ?? '').includes(q) ||
+        (s.photoNo ?? '').includes(q),
+    );
+  }
+}
+
 export async function fetchStudentsByClass(classId: string): Promise<Student[]> {
   try {
     const res = (await getSchoolStudents()) as { students?: ApiStudent[] };
@@ -247,6 +325,7 @@ type ApiStudentDetail = {
   mobile?: string;
   address?: string;
   admissionNo:string;
+  card?: Record<string, unknown>;
   uniqueCode?: string;
   status?: string;
   correctionReason?: string;
@@ -367,6 +446,36 @@ function getPreferredStudentMobile(student: ApiStudentDetail): string | undefine
   return undefined;
 }
 
+function normalizeCardFields(value: unknown): Student['card'] | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const entries = Object.entries(value as Record<string, unknown>).filter(
+    ([, v]) => v !== null && v !== undefined && String(v).trim() !== '',
+  );
+  if (!entries.length) return undefined;
+  return Object.fromEntries(entries.map(([k, v]) => [k, typeof v === 'boolean' ? v : String(v)]));
+}
+
+/** Full card template from API — keeps empty keys so forms match template fields. */
+function normalizeCardTemplate(value: unknown): Student['cardTemplate'] | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const entries = Object.entries(value as Record<string, unknown>).filter(([key]) => {
+    const norm = key.toLowerCase().replace(/[^a-z0-9]/g, '');
+    return norm !== 'photo' && norm !== 'photourl' && norm !== 'colorcode';
+  });
+  if (!entries.length) return undefined;
+  return Object.fromEntries(
+    entries.map(([k, v]) => [
+      k,
+      v == null || v === undefined ? '' : typeof v === 'boolean' ? String(v) : String(v),
+    ]),
+  );
+}
+
+type ApiPreviewTemplate = {
+  elements?: Array<{ type?: string; dataField?: string }>;
+  backElements?: Array<{ type?: string; dataField?: string }>;
+};
+
 function getFullPhotoUrl(photoUrl: string | undefined): string | undefined {
   if (!photoUrl || !photoUrl.trim()) return undefined;
   const base = mobile_siteConfig.BASE_URL.replace(/\/$/, '');
@@ -377,18 +486,22 @@ function getFullPhotoUrl(photoUrl: string | undefined): string | undefined {
 export async function fetchStudentDetail(id: string): Promise<Student | null> {
   // console.log("fetchStudentDetail id", id);
   try {
-    const res = (await getSchoolStudentDetail(id)) as { student?: ApiStudentDetail };
-    // console.log("fetchStudentDetail res", res);
+    const res = (await getSchoolStudentDetail(id)) as {
+      student?: ApiStudentDetail;
+      card?: Record<string, unknown>;
+    };
     const s = res?.student;
-    console.log("fetchStudentDetail res", res);
-    console.log("fetchStudentDetail s", s);
-    // console.log("fetchStudentDetail s", s);
     if (!s) return null;
+    const cardRaw = res?.card ?? s.card;
+    const card = normalizeCardFields(cardRaw);
+    const cardTemplate = normalizeCardTemplate(cardRaw);
     const schoolIdObj = s.schoolId && typeof s.schoolId === 'object' ? s.schoolId : null;
     const classIdObj = s.classId && typeof s.classId === 'object' ? s.classId : null;
     return {
       id: s._id,
       name: s.studentName,
+      card: card,
+      cardTemplate: cardTemplate,
       uniqueCode: s.uniqueCode,
       mobile: getPreferredStudentMobile(s),
       admissionNo:s.admissionNo,
@@ -434,6 +547,74 @@ export async function rejectPreview(studentId: string, comment: string): Promise
     }
     setMockStudents([...list]);
     throw new Error('Failed to reject preview');
+  }
+}
+
+/** Resolve add-student form keys from class template (preview elements or student card template). */
+export async function resolveAddStudentFieldKeys(
+  students: Student[],
+): Promise<string[]> {
+  const sampleId = students[0]?.id;
+  if (sampleId) {
+    try {
+      const preview = (await getSchoolPreview(sampleId)) as {
+        template?: ApiPreviewTemplate;
+      };
+      const fromElements = mergeTemplateFieldKeys(
+        extractTemplateDataFields(preview?.template?.elements),
+        extractTemplateDataFields(preview?.template?.backElements),
+      );
+      if (fromElements.length > 0) return fromElements;
+    } catch {
+      /* try detail card template */
+    }
+
+    try {
+      const detail = await fetchStudentDetail(sampleId);
+      if (detail?.cardTemplate) return getAddStudentFieldKeys(detail.cardTemplate);
+      if (detail?.card) return getAddStudentFieldKeys(detail.card);
+    } catch {
+      /* use defaults */
+    }
+  }
+
+  const withTemplate = students.find(
+    (s) => s.cardTemplate && Object.keys(s.cardTemplate).length > 0,
+  );
+  if (withTemplate?.cardTemplate) return getAddStudentFieldKeys(withTemplate.cardTemplate);
+
+  const withCard = students.find((s) => s.card && Object.keys(s.card).length > 0);
+  if (withCard?.card) return getAddStudentFieldKeys(withCard.card);
+
+  return getAddStudentFieldKeys(undefined);
+}
+
+/** Create student – POST api/school/students */
+export async function createStudent(payload: StudentCreatePayload): Promise<void> {
+  try {
+    const res = await createSchoolStudent(payload);
+    const data = res && typeof res === 'object' && 'data' in res ? (res as { data: unknown }).data : res;
+    console.log('[createStudent] API response:', JSON.stringify(data ?? res, null, 2));
+  } catch (e) {
+    console.log('[createStudent] API error:', e);
+    const axiosErr = e as { response?: { data?: { message?: string } } };
+    const msg = axiosErr.response?.data?.message;
+    throw new Error(typeof msg === 'string' ? msg : 'Failed to add student');
+  }
+}
+
+/** Update student – PUT api/school/students/:studentId */
+export async function updateStudent(
+  studentId: string,
+  payload: StudentUpdatePayload,
+): Promise<void> {
+  try {
+    const res = await updateSchoolStudent(studentId, payload);
+    const data = res && typeof res === 'object' && 'data' in res ? (res as { data: unknown }).data : res;
+    console.log('[updateStudent] API response:', JSON.stringify(data ?? res, null, 2));
+  } catch (e) {
+    console.log('[updateStudent] API error:', e);
+    throw e instanceof Error ? e : new Error('Failed to update student');
   }
 }
 

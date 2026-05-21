@@ -22,6 +22,8 @@ export const mobile_siteConfig = Object.freeze({
     /** GET api/school/profile — school account details (Bearer). */
     PROFILE: 'api/school/profile',
     STUDENTS: 'api/school/students',
+    /** GET api/school/students/global-search?search= — school-wide student search (Bearer). */
+    STUDENTS_GLOBAL_SEARCH: 'api/school/students/global-search',
     CORRECTIONS: 'api/school/corrections',
     PREVIEW: 'api/school/preview',
     /** PUT api/school/preview/:studentId/approve - mark delivered as received */

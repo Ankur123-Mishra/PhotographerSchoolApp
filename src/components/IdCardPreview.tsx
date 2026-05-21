@@ -23,6 +23,8 @@ interface IdCardPreviewProps {
  * Body: photo left with "Valid for current session" below it; right: Name, ID No., Class, School Name, Address.
  * Footer: AUTHORISED SIGNATORY, code.
  */
+
+
 export function IdCardPreview({ template, data, size = 'large', style }: IdCardPreviewProps) {
   console.log('=== IdCardPreview === ', data);
   const isLarge = size === 'large';

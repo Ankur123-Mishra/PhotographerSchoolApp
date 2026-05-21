@@ -9,12 +9,14 @@ interface SearchBarProps {
   placeholder?: string;
   onSearch: (query: string) => void;
   value?: string;
+  autoFocus?: boolean;
 }
 
 export default function SearchBar({
   placeholder = 'Search by name...',
   onSearch,
   value: controlledValue,
+  autoFocus = false,
 }: SearchBarProps) {
   const [localValue, setLocalValue] = useState(controlledValue ?? '');
   const value = controlledValue !== undefined ? controlledValue : localValue;
@@ -49,6 +51,7 @@ export default function SearchBar({
         value={value}
         onChangeText={handleChange}
         returnKeyType="search"
+        autoFocus={autoFocus}
       />
       {value.length > 0 ? (
         <TouchableOpacity onPress={clear} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>

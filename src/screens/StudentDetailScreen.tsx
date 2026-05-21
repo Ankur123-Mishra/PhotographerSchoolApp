@@ -1,4 +1,4 @@
-import React, { useCallback, useState, useEffect } from 'react';
+import React, { useCallback, useState, useEffect, useLayoutEffect } from 'react';
 import {
   View,
   Text,
@@ -18,15 +18,30 @@ import { useStudents } from '../context/StudentContext';
 import StatusBadge from '../components/StatusBadge';
 import CorrectionModal from '../components/CorrectionModal';
 import PhotoCaptureModal from '../components/PhotoCaptureModal';
+import StudentEditModal from '../components/StudentEditModal';
 import Loader from '../components/Loader';
 import type { MainStackParamList } from '../navigation/types';
-import type { Student } from '../types';
+import type { Student, StudentUpdatePayload } from '../types';
 import { colors, spacing, radius, typography, shadow } from '../theme/colors';
 import { PutDataWithToken, uploadPhoto } from '../Services/mobile-api';
 import { mobile_siteConfig } from '../Services/mobile-siteConfig';
+import { updateStudent } from '../Services/api';
+import { formatCardLabel, getCardFieldEntries, getStudentDisplayName } from '../utils/cardFields';
 
 type Nav = NativeStackNavigationProp<MainStackParamList, 'StudentDetail'>;
 type DetailRoute = RouteProp<MainStackParamList, 'StudentDetail'>;
+
+function getCardFieldIcon(key: string): string {
+  const k = key.toLowerCase();
+  if (k.includes('class') || k.includes('section')) return 'school-outline';
+  if (k.includes('phone') || k.includes('mobile') || k.includes('contact')) return 'call-outline';
+  if (k.includes('address') || k.includes('location')) return 'location-outline';
+  if (k.includes('dob') || k.includes('birth') || k.includes('date')) return 'calendar-outline';
+  if (k.includes('name')) return 'person-outline';
+  if (k.includes('admission') || k.includes('roll')) return 'document-text-outline';
+  if (k.includes('school')) return 'business-outline';
+  return 'information-circle-outline';
+}
 
 export default function StudentDetailScreen() {
   const { params } = useRoute<DetailRoute>();
@@ -36,6 +51,7 @@ export default function StudentDetailScreen() {
   const [student, setStudent] = useState<Student | null>(null);
   const [loading, setLoading] = useState(true);
   const [correctionVisible, setCorrectionVisible] = useState(false);
+  const [editVisible, setEditVisible] = useState(false);
   const [cameraVisible, setCameraVisible] = useState(false);
   const [photoError, setPhotoError] = useState(false);
   const [markingReceived, setMarkingReceived] = useState(false);
@@ -47,7 +63,6 @@ export default function StudentDetailScreen() {
     setLoading(true);
     setPhotoError(false);
     const s = await getStudentDetail(studentId);
-      console.log("Student Detail Screen",s)
     setStudent(s);
     setLoading(false);
   }, [studentId, getStudentDetail]);
@@ -55,6 +70,42 @@ export default function StudentDetailScreen() {
   useEffect(() => {
     load();
   }, [load]);
+
+  const onSaveStudent = useCallback(
+    async (payload: StudentUpdatePayload) => {
+      try {
+        await updateStudent(studentId, payload);
+        setError(null);
+        await load();
+        Alert.alert('Success', 'Student updated successfully.');
+      } catch (err: unknown) {
+        const message =
+          err && typeof err === 'object' && 'message' in err
+            ? String((err as { message: unknown }).message)
+            : 'Failed to update student';
+        throw new Error(message);
+      }
+    },
+    [studentId, load, setError],
+  );
+
+  useLayoutEffect(() => {
+    if (!student) {
+      navigation.setOptions({ headerRight: undefined });
+      return;
+    }
+    navigation.setOptions({
+      headerRight: () => (
+        <TouchableOpacity
+          onPress={() => setEditVisible(true)}
+          style={{ marginRight: spacing.sm }}
+          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+        >
+          <Ionicons name="create-outline" size={24} color={colors.primary} />
+        </TouchableOpacity>
+      ),
+    });
+  }, [navigation, student]);
 
   const onRaiseCorrection = async (reason: string) => {
     await raiseStudentCorrection(studentId, reason);
@@ -197,6 +248,8 @@ export default function StudentDetailScreen() {
   }
 
   const displayPhotoUri = pendingPhotoUri || student.photoUri;
+  const cardFields = getCardFieldEntries(student.card);
+  const displayName = getStudentDisplayName(student);
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
@@ -243,35 +296,27 @@ export default function StudentDetailScreen() {
       ) : null}
       <View style={styles.card}>
         <View style={styles.cardHeader}>
-          <Text style={styles.name}>{student.name}</Text>
+          <Text style={styles.name}>{displayName}</Text>
           <StatusBadge status={student.status} />
         </View>
-        <View style={styles.metaRow}>
-          <Ionicons name="document-text-outline" size={18} color={colors.textMuted} />
-          <Text style={styles.meta}>Admission No: {student.admissionNo || '—'}</Text>
-        </View>
-        <View style={styles.metaRow}>
-          <Ionicons name="school-outline" size={18} color={colors.textMuted} />
-          <Text style={styles.meta}>Class: {student.className}</Text>
-        </View>
-        {/* {student.sectionName ? (
-          <View style={styles.metaRow}>
-            <Ionicons name="layers-outline" size={18} color={colors.textMuted} />
-            <Text style={styles.meta}>Section: {student.sectionName}</Text>
-          </View>
-        ) : null} */}
-        <View style={styles.metaRow}>
-          <Ionicons name="call-outline" size={18} color={colors.textMuted} />
-          <Text style={styles.meta}>Mobile: {student.mobile || '—'}</Text>
-        </View>
-        <View style={styles.metaRow}>
-          <Ionicons name="location-outline" size={18} color={colors.textMuted} />
-          <Text style={styles.meta}>Address: {student.address || '—'}</Text>
-        </View>
-        <View style={styles.metaRow}>
-          <Ionicons name="business-outline" size={18} color={colors.textMuted} />
-          <Text style={styles.meta}>School: {student.schoolName}</Text>
-        </View>
+        {cardFields.length > 0 ? (
+          cardFields
+            .filter(([key]) => key.toLowerCase() !== 'name')
+            .map(([key, value]) => (
+              <View key={key} style={styles.metaRow}>
+                <Ionicons
+                  name={getCardFieldIcon(key)}
+                  size={18}
+                  color={colors.textMuted}
+                />
+                <Text style={styles.meta}>
+                  {formatCardLabel(key)}: {String(value)}
+                </Text>
+              </View>
+            ))
+        ) : (
+          <Text style={styles.metaEmpty}>No card details available</Text>
+        )}
       </View>
       {student.correctionReason ? (
         <View style={styles.card}>
@@ -297,7 +342,7 @@ export default function StudentDetailScreen() {
             <Text style={styles.btnText}>View Preview</Text>
           </TouchableOpacity>
         )}
-        
+
         {/* {canRaiseCorrection && (
           <TouchableOpacity
             style={[styles.btn, styles.btnSecondary]}
@@ -324,6 +369,13 @@ export default function StudentDetailScreen() {
         studentName={student.name}
         onClose={() => setCorrectionVisible(false)}
         onSubmit={onRaiseCorrection}
+      />
+
+      <StudentEditModal
+        visible={editVisible}
+        student={student}
+        onClose={() => setEditVisible(false)}
+        onSubmit={onSaveStudent}
       />
 
       <PhotoCaptureModal
@@ -413,7 +465,8 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
     marginBottom: spacing.sm,
   },
-  meta: { ...typography.bodySmall, color: colors.textSecondary },
+  meta: { ...typography.bodySmall, color: colors.textSecondary, flex: 1 },
+  metaEmpty: { ...typography.bodySmall, color: colors.textMuted },
   label: { ...typography.label, color: colors.textMuted, marginBottom: spacing.sm },
   reason: { ...typography.bodySmall, color: colors.textSecondary },
   actions: { marginTop: spacing.lg, gap: spacing.md },

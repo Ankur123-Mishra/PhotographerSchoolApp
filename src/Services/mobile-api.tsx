@@ -143,7 +143,11 @@ export async function PutDataWithToken(data, urlPath) {
     console.log('=== vv RESPONSE ===', response.data);
     return response.data;
   } catch (error) {
+    const axiosErr = error as { response?: { status?: number; data?: unknown } };
     console.error('=== ERROR ===', error);
+    if (axiosErr.response?.data) {
+      console.error('=== ERROR BODY ===', axiosErr.response.data);
+    }
     throw error;
   }
 }
@@ -250,12 +254,120 @@ export async function getSchoolStudents() {
   return data;
 }
 
+/** School-wide student search – GET api/school/students/global-search?search= with Bearer token. */
+export async function getSchoolStudentsGlobalSearch(search: string) {
+  const q = encodeURIComponent(search.trim());
+  const path = `${mobile_siteConfig.SCHOOL_ENDPOINTS.STUDENTS_GLOBAL_SEARCH}?search=${q}`;
+  const response = await getDataWithToken(null, path);
+  const data = response?.data ?? response;
+  return data;
+}
+
 /** School student detail – GET api/school/students/:studentId with Bearer token. Returns { student: { _id, schoolId: { _id, schoolName }, classId: { _id, className, section }, rollNo, studentName, status, ... } }. */
 export async function getSchoolStudentDetail(studentId: string) {
   const path = `${mobile_siteConfig.SCHOOL_ENDPOINTS.STUDENTS}/${studentId}`;
   const response = await getDataWithToken(null, path);
   const data = response?.data ?? response;
   return data;
+}
+
+function appendImageFile(formData: FormData, fieldName: string, uri: string) {
+  const filename = uri.split('/').pop() || 'photo.jpg';
+  const mime = filename.toLowerCase().endsWith('.png') ? 'image/png' : 'image/jpeg';
+  formData.append(fieldName, {
+    uri,
+    type: mime,
+    name: filename,
+  } as unknown as Blob);
+}
+
+/** POST multipart/form-data with Bearer token (React Native FormData). */
+export async function postFormDataWithToken(formData: FormData, urlPath: string) {
+  const token = await getDataFromAsyncStorage(
+    mobile_siteConfig.MOB_ACCESS_TOKEN_KEY,
+  );
+  const url = `${mobile_siteConfig.BASE_URL}${urlPath}`;
+  console.log('=== postFormDataWithToken ===', url);
+
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      Accept: '*/*',
+      Authorization: `Bearer ${token}`,
+    },
+    body: formData,
+  });
+
+  if (!response.ok) {
+    const text = await response.text();
+    let errMessage = text || `Request failed (${response.status})`;
+    try {
+      const json = JSON.parse(text);
+      if (json.message) errMessage = json.message;
+    } catch (_) {}
+    const err = new Error(errMessage) as Error & { response?: { data?: { message?: string } } };
+    err.response = { data: { message: errMessage } };
+    throw err;
+  }
+
+  const contentType = response.headers.get('content-type');
+  if (contentType?.includes('application/json')) {
+    return response.json();
+  }
+  return response.text();
+}
+
+/** School student create – POST api/school/students multipart/form-data with Bearer token. */
+export async function createSchoolStudent(body: {
+  classId: string;
+  studentName: string;
+  admissionNo: string;
+  rollNo: string;
+  fatherName: string;
+  motherName: string;
+  dob: string;
+  mobile: string;
+  address: string;
+  gender: string;
+  bloodGroup: string;
+  house: string;
+  photoNo: string;
+  extraFields?: Record<string, string>;
+  photoUri?: string;
+  housePhotoUri?: string;
+}) {
+  const formData = new FormData();
+  formData.append('classId', body.classId);
+  formData.append('studentName', body.studentName);
+  formData.append('admissionNo', body.admissionNo);
+  formData.append('rollNo', body.rollNo);
+  formData.append('fatherName', body.fatherName);
+  formData.append('motherName', body.motherName);
+  formData.append('dob', body.dob);
+  formData.append('mobile', body.mobile);
+  formData.append('gender', body.gender);
+  formData.append('bloodGroup', body.bloodGroup);
+  formData.append('house', body.house);
+  formData.append('photoNo', body.photoNo);
+  formData.append('address', body.address);
+
+  for (const [key, value] of Object.entries(body.extraFields ?? {})) {
+    if (value.trim()) formData.append(key, value.trim());
+  }
+
+  if (body.photoUri) appendImageFile(formData, 'photo', body.photoUri);
+  if (body.housePhotoUri) appendImageFile(formData, 'housePhoto', body.housePhotoUri);
+
+  return postFormDataWithToken(formData, mobile_siteConfig.SCHOOL_ENDPOINTS.STUDENTS);
+}
+
+/** School student update – PUT api/school/students/:studentId with Bearer token. */
+export async function updateSchoolStudent(
+  studentId: string,
+  body: Record<string, unknown>,
+) {
+  const path = `${mobile_siteConfig.SCHOOL_ENDPOINTS.STUDENTS}/${studentId}`;
+  return PutDataWithToken(body, path);
 }
 
 /** School student request correction – PUT api/school/students/:studentId/request-correction with Bearer token. Body: { comment }. */

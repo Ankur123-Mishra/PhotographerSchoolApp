@@ -270,6 +270,7 @@ export default function PhotoCaptureModal({
       </View>
     </Modal>
   );
+  
 }
 
 const styles = StyleSheet.create({
