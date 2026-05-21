@@ -465,8 +465,10 @@ export async function uploadPhoto(
   );
   const url = `${mobile_siteConfig.BASE_URL}${mobile_siteConfig.PHOTOGRAPHER_ENDPOINTS.PHOTOS_UPLOAD}`;
   const formData = new FormData();
-  const filename = photoUri.split('/').pop() || 'photo.jpg';
-  const mime = filename.toLowerCase().endsWith('.png') ? 'image/png' : 'image/jpeg';
+  const rawName = photoUri.split('/').pop() || '';
+  const isPng = rawName.toLowerCase().endsWith('.png') || photoUri.toLowerCase().includes('.png');
+  const filename = isPng ? (rawName.toLowerCase().endsWith('.png') ? rawName : 'photo.png') : (rawName || 'photo.jpg');
+  const mime = isPng ? 'image/png' : 'image/jpeg';
   formData.append('photo', {
     uri: photoUri,
     type: mime,

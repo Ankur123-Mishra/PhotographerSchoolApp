@@ -10,6 +10,7 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { NavigationContainer } from '@react-navigation/native';
 import { AuthProvider, useAuth } from './src/context/AuthContext';
 import { StudentProvider } from './src/context/StudentContext';
+import FrameShapeMaskHost from './src/components/FrameShapeMaskHost';
 import SplashScreen from './src/screens/SplashScreen';
 import AuthStack from './src/navigation/AuthStack';
 import BottomTabs from './src/navigation/BottomTabs';
@@ -40,6 +41,7 @@ export default function App() {
       <StatusBar barStyle="dark-content" backgroundColor="#f1f5f9" />
       <AuthProvider>
         <StudentProvider>
+          <FrameShapeMaskHost />
           <AppContent />
         </StudentProvider>
       </AuthProvider>

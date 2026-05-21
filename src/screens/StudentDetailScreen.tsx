@@ -18,6 +18,9 @@ import { useStudents } from '../context/StudentContext';
 import StatusBadge from '../components/StatusBadge';
 import CorrectionModal from '../components/CorrectionModal';
 import PhotoCaptureModal from '../components/PhotoCaptureModal';
+import CropFrameSelectModal from '../components/CropFrameSelectModal';
+import type { CropFrameType } from '../types/cropFrame';
+import { cropImageToFrame } from '../utils/cropImageToFrame';
 import StudentEditModal from '../components/StudentEditModal';
 import Loader from '../components/Loader';
 import type { MainStackParamList } from '../navigation/types';
@@ -52,6 +55,8 @@ export default function StudentDetailScreen() {
   const [loading, setLoading] = useState(true);
   const [correctionVisible, setCorrectionVisible] = useState(false);
   const [editVisible, setEditVisible] = useState(false);
+  const [frameSelectVisible, setFrameSelectVisible] = useState(false);
+  const [selectedCropFrame, setSelectedCropFrame] = useState<CropFrameType | null>(null);
   const [cameraVisible, setCameraVisible] = useState(false);
   const [photoError, setPhotoError] = useState(false);
   const [markingReceived, setMarkingReceived] = useState(false);
@@ -171,45 +176,61 @@ export default function StudentDetailScreen() {
   const onPhotoCapture = useCallback((photoUri: string) => {
     setPhotoError(false);
     setPendingPhotoUri(photoUri);
+    setSelectedCropFrame(null);
+    setCameraVisible(false);
   }, []);
 
-  const onPickFromGallery = useCallback(async () => {
-    try {
-      const result = await launchImageLibrary({
-        mediaType: 'photo',
-        quality: 0.9,
-        selectionLimit: 1,
-      });
+  const onPickFromGallery = useCallback(
+    async (frameType: CropFrameType) => {
+      try {
+        const result = await launchImageLibrary({
+          mediaType: 'photo',
+          quality: 0.9,
+          selectionLimit: 1,
+        });
 
-      if (result.didCancel) return;
+        if (result.didCancel) return;
 
-      if (result.errorCode) {
-        Alert.alert('Error', result.errorMessage || 'Failed to pick image from gallery.');
-        return;
+        if (result.errorCode) {
+          Alert.alert('Error', result.errorMessage || 'Failed to pick image from gallery.');
+          return;
+        }
+
+        const uri = result.assets?.[0]?.uri;
+        if (!uri) {
+          Alert.alert('Error', 'No image selected.');
+          return;
+        }
+
+        const croppedUri = await cropImageToFrame(uri, frameType);
+        onPhotoCapture(croppedUri);
+      } catch {
+        Alert.alert('Error', 'Failed to process gallery image. Please try again.');
       }
+    },
+    [onPhotoCapture],
+  );
 
-      const uri = result.assets?.[0]?.uri;
-      if (uri) {
-        onPhotoCapture(uri);
-      } else {
-        Alert.alert('Error', 'No image selected.');
-      }
-    } catch {
-      Alert.alert('Error', 'Failed to open gallery. Please try again.');
-    }
-  }, [onPhotoCapture]);
+  const onFrameSelected = useCallback(
+    (frameType: CropFrameType) => {
+      setSelectedCropFrame(frameType);
+      setFrameSelectVisible(false);
+      Alert.alert(
+        'Add Photo',
+        'Capture or upload a photo using the selected frame',
+        [
+          { text: 'Camera', onPress: () => setCameraVisible(true) },
+          { text: 'Gallery', onPress: () => onPickFromGallery(frameType) },
+          { text: 'Cancel', style: 'cancel', onPress: () => setSelectedCropFrame(null) },
+        ],
+      );
+    },
+    [onPickFromGallery],
+  );
 
   const onPhotoSourcePress = useCallback(() => {
-    Alert.alert(
-      'Upload Photo',
-      'Choose how you want to add the student photo',
-      [
-        { text: 'Camera', onPress: () => setCameraVisible(true) },
-        { text: 'Gallery', onPress: onPickFromGallery },
-        { text: 'Cancel', style: 'cancel' },
-      ],
-    );
-  }, [onPickFromGallery]);
+    setFrameSelectVisible(true);
+  }, []);
 
   const onUploadPendingPhoto = useCallback(async () => {
     if (!pendingPhotoUri || uploadingPhoto) return;
@@ -378,11 +399,24 @@ export default function StudentDetailScreen() {
         onSubmit={onSaveStudent}
       />
 
-      <PhotoCaptureModal
-        visible={cameraVisible}
-        onClose={() => setCameraVisible(false)}
-        onPhotoCapture={onPhotoCapture}
+      <CropFrameSelectModal
+        visible={frameSelectVisible}
+        subtitle={`Choose a crop frame for ${displayName}'s photo.`}
+        onClose={() => setFrameSelectVisible(false)}
+        onSelect={onFrameSelected}
       />
+
+      {selectedCropFrame ? (
+        <PhotoCaptureModal
+          visible={cameraVisible}
+          cropFrame={selectedCropFrame}
+          onClose={() => {
+            setCameraVisible(false);
+            if (!pendingPhotoUri) setSelectedCropFrame(null);
+          }}
+          onPhotoCapture={onPhotoCapture}
+        />
+      ) : null}
     </ScrollView>
   );
 }

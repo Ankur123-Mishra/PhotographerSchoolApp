@@ -7,31 +7,140 @@ import {
   TouchableOpacity,
   Alert,
   Dimensions,
-  Platform,
   ActivityIndicator,
-  Image as RNImage,
 } from 'react-native';
 import { Camera, useCameraDevice, useCameraPermission } from 'react-native-vision-camera';
-import ImageEditor from '@react-native-community/image-editor';
 import Ionicons from 'react-native-vector-icons/Ionicons';
-import Svg, { Defs, Mask, Rect } from 'react-native-svg';
+import Svg, { Circle, Defs, Mask, Polygon, Rect } from 'react-native-svg';
+import type { CropFrameType } from '../types/cropFrame';
+import { CROP_FRAME_OPTIONS } from '../types/cropFrame';
+import {
+  getBaseFrameRect,
+  getCircleFrame,
+  getPolygonPoints,
+} from '../utils/cropFrameGeometry';
+import { processImageToFrame } from '../utils/processImageToFrame';
 import { colors, spacing, radius, typography } from '../theme/colors';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
-const FRAME_LEFT_PERCENT = 0.12;
-const FRAME_TOP_PERCENT = 0.15;
-const FRAME_WIDTH_PERCENT = 0.76;
-const FRAME_HEIGHT_PERCENT = 0.43;
-const FRAME_CORNER_RADIUS = 24;
 
 interface PhotoCaptureModalProps {
   visible: boolean;
+  cropFrame: CropFrameType;
   onClose: () => void;
   onPhotoCapture: (photoUri: string) => void;
 }
 
+function FrameCutout({
+  frameType,
+  frame,
+}: {
+  frameType: CropFrameType;
+  frame: ReturnType<typeof getBaseFrameRect>;
+}) {
+  if (frameType === 'rectangle') {
+    return (
+      <Rect
+        x={frame.x}
+        y={frame.y}
+        width={frame.width}
+        height={frame.height}
+        fill="black"
+      />
+    );
+  }
+  if (frameType === 'rounded_rectangle') {
+    return (
+      <Rect
+        x={frame.x}
+        y={frame.y}
+        width={frame.width}
+        height={frame.height}
+        rx={frame.cornerRadius}
+        ry={frame.cornerRadius}
+        fill="black"
+      />
+    );
+  }
+  if (frameType === 'circle') {
+    const circle = getCircleFrame(frame);
+    return (
+      <Circle
+        cx={circle.x + circle.width / 2}
+        cy={circle.y + circle.height / 2}
+        r={circle.width / 2}
+        fill="black"
+      />
+    );
+  }
+  const points = getPolygonPoints(frameType, frame);
+  return <Polygon points={points} fill="black" />;
+}
+
+function FrameOutline({
+  frameType,
+  frame,
+}: {
+  frameType: CropFrameType;
+  frame: ReturnType<typeof getBaseFrameRect>;
+}) {
+  const stroke = 'rgba(255,255,255,0.9)';
+  const sw = 2;
+
+  if (frameType === 'rectangle') {
+    return (
+      <Rect
+        x={frame.x}
+        y={frame.y}
+        width={frame.width}
+        height={frame.height}
+        stroke={stroke}
+        strokeWidth={sw}
+        fill="none"
+      />
+    );
+  }
+  if (frameType === 'rounded_rectangle') {
+    return (
+      <Rect
+        x={frame.x}
+        y={frame.y}
+        width={frame.width}
+        height={frame.height}
+        rx={frame.cornerRadius}
+        ry={frame.cornerRadius}
+        stroke={stroke}
+        strokeWidth={sw}
+        fill="none"
+      />
+    );
+  }
+  if (frameType === 'circle') {
+    const circle = getCircleFrame(frame);
+    return (
+      <Circle
+        cx={circle.x + circle.width / 2}
+        cy={circle.y + circle.height / 2}
+        r={circle.width / 2}
+        stroke={stroke}
+        strokeWidth={sw}
+        fill="none"
+      />
+    );
+  }
+  return (
+    <Polygon
+      points={getPolygonPoints(frameType, frame)}
+      stroke={stroke}
+      strokeWidth={sw}
+      fill="none"
+    />
+  );
+}
+
 export default function PhotoCaptureModal({
   visible,
+  cropFrame,
   onClose,
   onPhotoCapture,
 }: PhotoCaptureModalProps) {
@@ -42,8 +151,10 @@ export default function PhotoCaptureModal({
   const device = useCameraDevice(cameraType);
   const { hasPermission, requestPermission } = useCameraPermission();
 
+  const frameLabel = CROP_FRAME_OPTIONS.find(o => o.id === cropFrame)?.label ?? 'Frame';
+
   const toggleCamera = useCallback(() => {
-    setCameraType(prev => prev === 'front' ? 'back' : 'front');
+    setCameraType(prev => (prev === 'front' ? 'back' : 'front'));
   }, []);
 
   const handleRequestPermission = useCallback(async () => {
@@ -52,7 +163,7 @@ export default function PhotoCaptureModal({
       Alert.alert(
         'Permission Required',
         'Camera permission is required to take photos',
-        [{ text: 'OK', onPress: onClose }]
+        [{ text: 'OK', onPress: onClose }],
       );
     }
   }, [requestPermission, onClose]);
@@ -67,64 +178,27 @@ export default function PhotoCaptureModal({
         enableShutterSound: false,
       });
 
-      const photoUri = Platform.OS === 'ios' ? `file://${photo.path}` : `file://${photo.path}`;
+      const photoUri = `file://${photo.path}`;
 
-      RNImage.getSize(
-        photoUri,
-        async (imageWidth, imageHeight) => {
-          try {
-            const screenAspect = SCREEN_WIDTH / SCREEN_HEIGHT;
-            const imageAspect = imageWidth / imageHeight;
-
-            let scaleFactor = 1;
-            let offsetX = 0;
-            let offsetY = 0;
-
-            if (imageAspect > screenAspect) {
-              scaleFactor = imageHeight / SCREEN_HEIGHT;
-              offsetX = (imageWidth - SCREEN_WIDTH * scaleFactor) / 2;
-            } else {
-              scaleFactor = imageWidth / SCREEN_WIDTH;
-              offsetY = (imageHeight - SCREEN_HEIGHT * scaleFactor) / 2;
-            }
-
-            const cropX = Math.max(0, offsetX + (SCREEN_WIDTH * FRAME_LEFT_PERCENT * scaleFactor));
-            const cropY = Math.max(0, offsetY + (SCREEN_HEIGHT * FRAME_TOP_PERCENT * scaleFactor));
-            const cropWidth = Math.min(imageWidth - cropX, SCREEN_WIDTH * FRAME_WIDTH_PERCENT * scaleFactor);
-            const cropHeight = Math.min(imageHeight - cropY, SCREEN_HEIGHT * FRAME_HEIGHT_PERCENT * scaleFactor);
-
-            const croppedImageUri = await ImageEditor.cropImage(photoUri, {
-              offset: { x: Math.round(cropX), y: Math.round(cropY) },
-              size: { width: Math.round(cropWidth), height: Math.round(cropHeight) },
-              displaySize: { width: Math.round(cropWidth), height: Math.round(cropHeight) },
-              resizeMode: 'contain',
-            });
-
-            const finalUri = typeof croppedImageUri === 'string' 
-              ? croppedImageUri 
-              : croppedImageUri?.uri || photoUri;
-
-            onPhotoCapture(finalUri);
-            onClose();
-          } catch (cropError) {
-            console.error('Crop error:', cropError);
-            Alert.alert('Error', 'Failed to crop photo. Please try again.');
-          } finally {
-            setIsCapturing(false);
-          }
-        },
-        (error) => {
-          console.error('Image size error:', error);
-          Alert.alert('Error', 'Failed to process photo. Please try again.');
-          setIsCapturing(false);
-        }
-      );
-    } catch (error: any) {
+      try {
+        const finalUri = await processImageToFrame(photoUri, cropFrame, {
+          screenWidth: SCREEN_WIDTH,
+          screenHeight: SCREEN_HEIGHT,
+        });
+        onPhotoCapture(finalUri);
+        onClose();
+      } catch (cropError) {
+        console.error('Crop error:', cropError);
+        Alert.alert('Error', 'Failed to crop photo. Please try again.');
+      } finally {
+        setIsCapturing(false);
+      }
+    } catch (error: unknown) {
       Alert.alert('Error', 'Failed to capture photo. Please try again.');
       console.error('Photo capture error:', error);
       setIsCapturing(false);
     }
-  }, [isCapturing, onPhotoCapture, onClose]);
+  }, [isCapturing, cropFrame, onPhotoCapture, onClose]);
 
   if (!visible) return null;
 
@@ -154,9 +228,7 @@ export default function PhotoCaptureModal({
         <View style={styles.permissionContainer}>
           <Ionicons name="alert-circle-outline" size={64} color={colors.error} />
           <Text style={styles.permissionTitle}>Camera Not Available</Text>
-          <Text style={styles.permissionText}>
-            No camera device found on this device
-          </Text>
+          <Text style={styles.permissionText}>No camera device found on this device</Text>
           <TouchableOpacity style={styles.cancelBtn} onPress={onClose}>
             <Text style={styles.cancelBtnText}>Close</Text>
           </TouchableOpacity>
@@ -165,11 +237,7 @@ export default function PhotoCaptureModal({
     );
   }
 
-  const frameX = SCREEN_WIDTH * FRAME_LEFT_PERCENT;
-  const frameY = SCREEN_HEIGHT * FRAME_TOP_PERCENT;
-  const frameWidth = SCREEN_WIDTH * FRAME_WIDTH_PERCENT;
-  const frameHeight = SCREEN_HEIGHT * FRAME_HEIGHT_PERCENT;
-  const frameCornerRadius = Math.min(FRAME_CORNER_RADIUS, frameWidth / 8, frameHeight / 8);
+  const frame = getBaseFrameRect(SCREEN_WIDTH, SCREEN_HEIGHT);
 
   return (
     <Modal visible={visible} animationType="slide" onRequestClose={onClose}>
@@ -187,15 +255,7 @@ export default function PhotoCaptureModal({
             <Defs>
               <Mask id="mask">
                 <Rect height={SCREEN_HEIGHT} width={SCREEN_WIDTH} fill="white" />
-                <Rect
-                  x={frameX}
-                  y={frameY}
-                  width={frameWidth}
-                  height={frameHeight}
-                  rx={frameCornerRadius}
-                  ry={frameCornerRadius}
-                  fill="black"
-                />
+                <FrameCutout frameType={cropFrame} frame={frame} />
               </Mask>
             </Defs>
             <Rect
@@ -204,33 +264,20 @@ export default function PhotoCaptureModal({
               fill="rgba(0, 0, 0, 0.7)"
               mask="url(#mask)"
             />
-            <Rect
-              x={frameX}
-              y={frameY}
-              width={frameWidth}
-              height={frameHeight}
-              rx={frameCornerRadius}
-              ry={frameCornerRadius}
-              stroke="rgba(255,255,255,0.9)"
-              strokeWidth="2"
-              fill="none"
-            />
+            <FrameOutline frameType={cropFrame} frame={frame} />
           </Svg>
 
           {showGuide && (
             <View style={styles.guideContainer}>
               <View style={styles.guideBox}>
-                <Ionicons name="person" size={32} color={colors.primary} />
+                <Ionicons name="scan-outline" size={32} color={colors.primary} />
                 <Text style={styles.guideText}>
-                  Position face and shoulders (upper body) within the outline
+                  Position the subject within the {frameLabel.toLowerCase()} outline
                 </Text>
                 <Text style={styles.guideSubText}>
-                  Use the flip button to switch between front and back camera
+                  Photo will be cropped to match the selected frame
                 </Text>
-                <TouchableOpacity
-                  style={styles.gotItBtn}
-                  onPress={() => setShowGuide(false)}
-                >
+                <TouchableOpacity style={styles.gotItBtn} onPress={() => setShowGuide(false)}>
                   <Text style={styles.gotItText}>Got it</Text>
                 </TouchableOpacity>
               </View>
@@ -241,7 +288,10 @@ export default function PhotoCaptureModal({
             <TouchableOpacity style={styles.closeBtn} onPress={onClose}>
               <Ionicons name="close" size={28} color="white" />
             </TouchableOpacity>
-            <Text style={styles.headerText}>Capture Student Photo</Text>
+            <View style={styles.headerCenter}>
+              <Text style={styles.headerText}>Capture Student Photo</Text>
+              <Text style={styles.headerSubText}>{frameLabel} frame</Text>
+            </View>
             <TouchableOpacity style={styles.flipBtn} onPress={toggleCamera}>
               <Ionicons name="camera-reverse" size={28} color="white" />
             </TouchableOpacity>
@@ -251,7 +301,7 @@ export default function PhotoCaptureModal({
             <View style={styles.instructionBox}>
               <Ionicons name="information-circle" size={20} color="white" />
               <Text style={styles.instructionText}>
-                Align face and upper body within the frame
+                Align subject within the {frameLabel.toLowerCase()}
               </Text>
             </View>
             <TouchableOpacity
@@ -270,7 +320,6 @@ export default function PhotoCaptureModal({
       </View>
     </Modal>
   );
-  
 }
 
 const styles = StyleSheet.create({
@@ -296,6 +345,10 @@ const styles = StyleSheet.create({
     paddingBottom: spacing.lg,
     backgroundColor: 'rgba(0, 0, 0, 0.5)',
   },
+  headerCenter: {
+    flex: 1,
+    alignItems: 'center',
+  },
   closeBtn: {
     width: 40,
     height: 40,
@@ -308,6 +361,11 @@ const styles = StyleSheet.create({
     color: 'white',
     fontSize: 18,
     fontWeight: '600',
+  },
+  headerSubText: {
+    color: 'rgba(255,255,255,0.75)',
+    fontSize: 13,
+    marginTop: 2,
   },
   flipBtn: {
     width: 40,

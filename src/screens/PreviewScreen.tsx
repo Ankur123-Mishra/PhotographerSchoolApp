@@ -370,7 +370,7 @@ export default function PreviewScreen() {
             ]}
           >
             {studentPhotoUri ? (
-              <Image source={{ uri: studentPhotoUri }} style={styles.photoElement} resizeMode="cover" />
+              <Image source={{ uri: studentPhotoUri }} style={styles.photoElement} resizeMode="contain" />
             ) : (
               <View style={styles.photoPlaceholder}>
                 <Text style={styles.photoPlaceholderText}>{student!.studentName.charAt(0)}</Text>
