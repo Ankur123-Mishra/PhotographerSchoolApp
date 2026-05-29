@@ -36,7 +36,6 @@ export default function PhotoCaptureModal({
   onPhotoCapture,
 }: PhotoCaptureModalProps) {
   const [isCapturing, setIsCapturing] = useState(false);
-  const [showGuide, setShowGuide] = useState(true);
   const [cameraType, setCameraType] = useState<'front' | 'back'>('back');
   const camera = useRef<Camera>(null);
   const device = useCameraDevice(cameraType);
@@ -217,26 +216,6 @@ export default function PhotoCaptureModal({
             />
           </Svg>
 
-          {showGuide && (
-            <View style={styles.guideContainer}>
-              <View style={styles.guideBox}>
-                <Ionicons name="person" size={32} color={colors.primary} />
-                <Text style={styles.guideText}>
-                  Position face and shoulders (upper body) within the outline
-                </Text>
-                <Text style={styles.guideSubText}>
-                  Use the flip button to switch between front and back camera
-                </Text>
-                <TouchableOpacity
-                  style={styles.gotItBtn}
-                  onPress={() => setShowGuide(false)}
-                >
-                  <Text style={styles.gotItText}>Got it</Text>
-                </TouchableOpacity>
-              </View>
-            </View>
-          )}
-
           <View style={styles.header}>
             <TouchableOpacity style={styles.closeBtn} onPress={onClose}>
               <Ionicons name="close" size={28} color="white" />
@@ -356,42 +335,6 @@ const styles = StyleSheet.create({
   },
   captureBtnDisabled: {
     opacity: 0.5,
-  },
-  guideContainer: {
-    ...StyleSheet.absoluteFillObject,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: 'rgba(0, 0, 0, 0.8)',
-  },
-  guideBox: {
-    backgroundColor: 'white',
-    borderRadius: radius.lg,
-    padding: spacing.xl,
-    marginHorizontal: spacing.xl,
-    alignItems: 'center',
-    gap: spacing.md,
-  },
-  guideText: {
-    ...typography.body,
-    color: colors.text,
-    textAlign: 'center',
-  },
-  guideSubText: {
-    ...typography.bodySmall,
-    color: colors.textSecondary,
-    textAlign: 'center',
-  },
-  gotItBtn: {
-    backgroundColor: colors.primary,
-    paddingHorizontal: spacing.xl,
-    paddingVertical: spacing.md,
-    borderRadius: radius.md,
-    marginTop: spacing.sm,
-  },
-  gotItText: {
-    color: 'white',
-    fontWeight: '600',
-    fontSize: 16,
   },
   permissionContainer: {
     flex: 1,

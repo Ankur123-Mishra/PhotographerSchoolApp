@@ -12,7 +12,8 @@ const Images = {
    EVENING:require("../assets/Image/Evening.png"),
    DINNER:require("../assets/Image/Dinner.png"),
    VEGICON:require("../assets/Icon/VegIcon.png"),
-   BANNER1:require("../assets/Image/banner1.png")
+   BANNER1:require("../assets/Image/banner1.png"),
+   ABSENT:require("../assets/Image/AB.png"),
 }
 
 export default Images;

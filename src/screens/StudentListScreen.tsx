@@ -27,12 +27,16 @@ type StudentListRoute = RouteProp<MainStackParamList, 'StudentList'>;
 
 export default function StudentListScreen() {
   const { params } = useRoute<StudentListRoute>();
-  const { classId, className } = params;
+  const classId = params?.classId ?? '';
+  const className = params?.className ?? '';
+  const listMode = params?.listMode ?? 'class';
+  const isPendingMode = listMode === 'pending';
   const navigation = useNavigation<Nav>();
   const {
     students,
     loading,
     loadStudentsByClass,
+    loadPendingStudents,
     refreshDashboard,
   } = useStudents();
 
@@ -45,15 +49,29 @@ export default function StudentListScreen() {
 
   useFocusEffect(
     useCallback(() => {
-      loadStudentsByClass(classId);
-    }, [classId, loadStudentsByClass])
+      if (isPendingMode) {
+        loadPendingStudents();
+        return;
+      }
+      if (classId) {
+        loadStudentsByClass(classId);
+      }
+    }, [classId, isPendingMode, loadPendingStudents, loadStudentsByClass])
   );
 
   const filtered = useMemo(() => {
     let list = [...students];
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase();
-      list = list.filter((s) => s.name.toLowerCase().includes(q));
+      list = list.filter((s) =>
+        [
+          s.name,
+          s.mobile,
+          s.photoNo,
+          s.rollNo,
+          s.admissionNo,
+        ].some((value) => (value ?? '').toString().toLowerCase().includes(q))
+      );
     }
     if (filterStatus !== 'all') {
       list = list.filter((s) => s.status === filterStatus);
@@ -62,9 +80,13 @@ export default function StudentListScreen() {
   }, [students, searchQuery, filterStatus]);
 
   const onRefresh = useCallback(() => {
-    loadStudentsByClass(classId);
+    if (isPendingMode) {
+      loadPendingStudents();
+    } else if (classId) {
+      loadStudentsByClass(classId);
+    }
     refreshDashboard();
-  }, [classId, loadStudentsByClass, refreshDashboard]);
+  }, [classId, isPendingMode, loadPendingStudents, loadStudentsByClass, refreshDashboard]);
 
   const onStudentPress = (student: Student) => {
     navigation.navigate('StudentDetail', { studentId: student.id });
@@ -96,16 +118,16 @@ export default function StudentListScreen() {
 
   useLayoutEffect(() => {
     navigation.setOptions({
-      headerRight: () => (
-        <TouchableOpacity
-          onPress={onOpenAddStudent}
-          style={{ marginRight: spacing.sm }}
-          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-          activeOpacity={0.7}
-        >
-          <Ionicons name="person-add-outline" size={24} color={colors.primary} />
-        </TouchableOpacity>
-      ),
+      // headerRight: () => (
+      //   <TouchableOpacity
+      //     onPress={onOpenAddStudent}
+      //     style={{ marginRight: spacing.sm }}
+      //     hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+      //     activeOpacity={0.7}
+      //   >
+      //     <Ionicons name="person-add-outline" size={24} color={colors.primary} />
+      //   </TouchableOpacity>
+      // ),
     });
   }, [navigation, onOpenAddStudent]);
 
@@ -116,7 +138,7 @@ export default function StudentListScreen() {
   return (
     <View style={styles.container}>
       <View style={styles.toolbar}>
-        <SearchBar onSearch={setSearchQuery} placeholder="Search by name..." />
+        <SearchBar onSearch={setSearchQuery} placeholder="Search by name, mobile or photo no." />
         <TouchableOpacity
           style={[styles.filterBtn, filterStatus !== 'all' && styles.filterBtnActive]}
           onPress={() => {
@@ -139,6 +161,7 @@ export default function StudentListScreen() {
       <FlatList
         data={filtered}
         keyExtractor={(item) => item.id}
+        keyboardShouldPersistTaps="handled"
         contentContainerStyle={styles.list}
         refreshControl={
           <RefreshControl refreshing={loading} onRefresh={onRefresh} tintColor={colors.primary} />

@@ -25,8 +25,9 @@ import type { Student, StudentUpdatePayload } from '../types';
 import { colors, spacing, radius, typography, shadow } from '../theme/colors';
 import { PutDataWithToken, uploadPhoto } from '../Services/mobile-api';
 import { mobile_siteConfig } from '../Services/mobile-siteConfig';
-import { updateStudent } from '../Services/api';
+import { resolveAddStudentFieldKeys, updateStudent } from '../Services/api';
 import { formatCardLabel, getCardFieldEntries, getStudentDisplayName } from '../utils/cardFields';
+import Images from '../assets/image';
 
 type Nav = NativeStackNavigationProp<MainStackParamList, 'StudentDetail'>;
 type DetailRoute = RouteProp<MainStackParamList, 'StudentDetail'>;
@@ -53,6 +54,7 @@ export default function StudentDetailScreen() {
   const [correctionVisible, setCorrectionVisible] = useState(false);
   const [editVisible, setEditVisible] = useState(false);
   const [cameraVisible, setCameraVisible] = useState(false);
+  const [editFieldKeys, setEditFieldKeys] = useState<string[]>([]);
   const [photoError, setPhotoError] = useState(false);
   const [markingReceived, setMarkingReceived] = useState(false);
   /** Local file URI after capture; cleared after successful server upload */
@@ -63,6 +65,7 @@ export default function StudentDetailScreen() {
     setLoading(true);
     setPhotoError(false);
     const s = await getStudentDetail(studentId);
+    console.log('=== s === ', s);
     setStudent(s);
     setLoading(false);
   }, [studentId, getStudentDetail]);
@@ -97,11 +100,18 @@ export default function StudentDetailScreen() {
     navigation.setOptions({
       headerRight: () => (
         <TouchableOpacity
-          onPress={() => setEditVisible(true)}
-          style={{ marginRight: spacing.sm }}
+          onPress={() => {
+            if (!student) return;
+            setEditFieldKeys([]);
+            resolveAddStudentFieldKeys([student])
+              .then((keys) => setEditFieldKeys(keys))
+              .catch(() => setEditFieldKeys([]))
+              .finally(() => setEditVisible(true));
+          }}
+          style={styles.headerEditButton}
           hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
         >
-          <Ionicons name="create-outline" size={24} color={colors.primary} />
+          <Text style={styles.headerEditButtonText}>Edit</Text>
         </TouchableOpacity>
       ),
     });
@@ -199,18 +209,6 @@ export default function StudentDetailScreen() {
     }
   }, [onPhotoCapture]);
 
-  const onPhotoSourcePress = useCallback(() => {
-    Alert.alert(
-      'Upload Photo',
-      'Choose how you want to add the student photo',
-      [
-        { text: 'Camera', onPress: () => setCameraVisible(true) },
-        { text: 'Gallery', onPress: onPickFromGallery },
-        { text: 'Cancel', style: 'cancel' },
-      ],
-    );
-  }, [onPickFromGallery]);
-
   const onUploadPendingPhoto = useCallback(async () => {
     if (!pendingPhotoUri || uploadingPhoto) return;
     setUploadingPhoto(true);
@@ -254,24 +252,22 @@ export default function StudentDetailScreen() {
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
       <View style={styles.photoContainer}>
-        {displayPhotoUri && !photoError ? (
-          <Image
-            source={{ uri: displayPhotoUri }}
-            style={styles.photo}
-            resizeMode="contain"
-            onError={() => setPhotoError(true)}
-          />
-        ) : (
-          <View style={styles.photoPlaceholder}>
-            <Ionicons name="person" size={56} color={colors.textMuted} />
-            <Text style={styles.photoPlaceholderText}>
-              {displayPhotoUri && photoError ? 'Photo failed to load' : 'No photo'}
-            </Text>
-          </View>
-        )}
+        <Image
+          source={displayPhotoUri && !photoError ? { uri: displayPhotoUri } : Images.ABSENT}
+          style={styles.photo}
+          resizeMode="contain"
+          onError={() => setPhotoError(true)}
+        />
+        <TouchableOpacity
+          style={[styles.uploadBtn, styles.uploadBtnLeft]}
+          onPress={onPickFromGallery}
+          activeOpacity={0.8}
+        >
+          <Ionicons name="images" size={24} color="white" />
+        </TouchableOpacity>
         <TouchableOpacity
           style={styles.uploadBtn}
-          onPress={onPhotoSourcePress}
+          onPress={() => setCameraVisible(true)}
           activeOpacity={0.8}
         >
           <Ionicons name="camera" size={24} color="white" />
@@ -374,6 +370,7 @@ export default function StudentDetailScreen() {
       <StudentEditModal
         visible={editVisible}
         student={student}
+        fieldKeys={editFieldKeys}
         onClose={() => setEditVisible(false)}
         onSubmit={onSaveStudent}
       />
@@ -408,15 +405,6 @@ const styles = StyleSheet.create({
     borderRadius: radius.lg,
     backgroundColor: colors.borderLight,
   },
-  photoPlaceholder: {
-    width: '100%',
-    height: 220,
-    borderRadius: radius.lg,
-    backgroundColor: colors.borderLight,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  photoPlaceholderText: { ...typography.bodySmall, color: colors.textMuted, marginTop: spacing.sm },
   uploadBtn: {
     position: 'absolute',
     bottom: 12,
@@ -428,6 +416,10 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     ...shadow.sm,
+  },
+  uploadBtnLeft: {
+    left: 12,
+    right: undefined,
   },
   uploadPhotoBtn: {
     flexDirection: 'row',
@@ -483,4 +475,15 @@ const styles = StyleSheet.create({
   btnDisabled: { opacity: 0.7 },
   btnText: { color: colors.textInverse, ...typography.bodyMedium },
   btnTextSecondary: { color: colors.textSecondary, ...typography.bodyMedium },
+  headerEditButton: {
+    marginRight: spacing.sm,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs,
+    borderRadius: radius.full,
+    backgroundColor: colors.primary,
+  },
+  headerEditButtonText: {
+    color: colors.textInverse,
+    ...typography.bodySmall,
+  },
 });

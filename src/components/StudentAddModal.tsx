@@ -21,12 +21,15 @@ import {
   cardFormToCreatePayload,
   formatCardLabel,
 } from '../utils/cardFields';
-import type { StudentCreatePayload } from '../types';
+import type { ClassItem, StudentCreatePayload } from '../types';
 
 interface StudentAddModalProps {
   visible: boolean;
   fieldKeys: string[];
   classId: string;
+  classOptions?: ClassItem[];
+  onClassChange?: (classId: string) => void | Promise<void>;
+  loadingFields?: boolean;
   onClose: () => void;
   onSubmit: (payload: StudentCreatePayload) => Promise<void>;
 }
@@ -35,12 +38,31 @@ export default function StudentAddModal({
   visible,
   fieldKeys,
   classId,
+  classOptions = [],
+  onClassChange,
+  loadingFields = false,
   onClose,
   onSubmit,
 }: StudentAddModalProps) {
   const [form, setForm] = useState<Record<string, string>>({});
   const [photoUri, setPhotoUri] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [classDropdownOpen, setClassDropdownOpen] = useState(false);
+  const [selectedClassId, setSelectedClassId] = useState(classId);
+
+  useEffect(() => {
+    if (!visible) return;
+    setClassDropdownOpen(false);
+    if (classOptions.length > 0) {
+      if (classId) {
+        setSelectedClassId(classId);
+      } else {
+        setSelectedClassId('');
+      }
+      return;
+    }
+    setSelectedClassId(classId);
+  }, [visible, classId, classOptions]);
 
   useEffect(() => {
     if (visible && fieldKeys.length > 0) {
@@ -102,6 +124,12 @@ export default function StudentAddModal({
   }, [onPickFromGallery, onTakePhoto]);
 
   const handleSubmit = async () => {
+    const effectiveClassId = classOptions.length > 0 ? selectedClassId : classId;
+    if (!effectiveClassId) {
+      Alert.alert('Required', 'Please select a class.');
+      return;
+    }
+
     const name =
       (form.name ?? form.studentName ?? '').trim() ||
       Object.entries(form).find(([k]) => normalizeKey(k) === 'name')?.[1]?.trim() ||
@@ -114,7 +142,7 @@ export default function StudentAddModal({
 
     setLoading(true);
     try {
-      const payload = cardFormToCreatePayload(form, classId);
+      const payload = cardFormToCreatePayload(form, effectiveClassId);
       if (photoUri) payload.photoUri = photoUri;
       await onSubmit(payload);
       onClose();
@@ -129,7 +157,12 @@ export default function StudentAddModal({
     if (!loading) onClose();
   };
 
-  const canSave = fieldKeys.length > 0 && !loading;
+  const selectedClassName =
+    classOptions.find((item) => item.id === selectedClassId)?.name ?? 'Select class';
+  const canSave =
+    fieldKeys.length > 0 &&
+    !loading &&
+    (classOptions.length === 0 || Boolean(selectedClassId));
 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={handleClose}>
@@ -146,6 +179,52 @@ export default function StudentAddModal({
             keyboardShouldPersistTaps="handled"
             showsVerticalScrollIndicator={false}
           >
+            {classOptions.length > 0 ? (
+              <View style={styles.field}>
+                <Text style={styles.label}>Class</Text>
+                <TouchableOpacity
+                  style={styles.dropdownTrigger}
+                  onPress={() => setClassDropdownOpen((prev) => !prev)}
+                  disabled={loading || loadingFields}
+                  activeOpacity={0.85}
+                >
+                  <Text style={[styles.dropdownText, !selectedClassId && styles.placeholderText]}>
+                    {selectedClassName}
+                  </Text>
+                  {loadingFields ? (
+                    <ActivityIndicator color={colors.primary} size="small" />
+                  ) : (
+                    <Ionicons
+                      name={classDropdownOpen ? 'chevron-up' : 'chevron-down'}
+                      size={18}
+                      color={colors.textMuted}
+                    />
+                  )}
+                </TouchableOpacity>
+                {classDropdownOpen ? (
+                  <View style={styles.dropdownList}>
+                    {classOptions.map((item) => (
+                      <TouchableOpacity
+                        key={item.id}
+                        style={styles.dropdownItem}
+                        onPress={() => {
+                          setSelectedClassId(item.id);
+                          setClassDropdownOpen(false);
+                          onClassChange?.(item.id);
+                        }}
+                        disabled={loading || loadingFields}
+                        activeOpacity={0.85}
+                      >
+                        <Text style={styles.dropdownItemText}>{item.name}</Text>
+                        {selectedClassId === item.id ? (
+                          <Ionicons name="checkmark" size={18} color={colors.primary} />
+                        ) : null}
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                ) : null}
+              </View>
+            ) : null}
             <View style={styles.field}>
               <Text style={styles.label}>Student Photo</Text>
               {photoUri ? (
@@ -173,7 +252,12 @@ export default function StudentAddModal({
                 </Text>
               </TouchableOpacity>
             </View>
-            {fieldKeys.length > 0 ? (
+            {loadingFields ? (
+              <View style={styles.fieldLoaderWrap}>
+                <ActivityIndicator color={colors.primary} />
+                <Text style={styles.fieldLoaderText}>Loading form fields...</Text>
+              </View>
+            ) : fieldKeys.length > 0 ? (
               fieldKeys.map((key) => (
                 <View key={key} style={styles.field}>
                   <Text style={styles.label}>{formatCardLabel(key)}</Text>
@@ -264,6 +348,58 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: colors.text,
     backgroundColor: colors.borderLight,
+  },
+  dropdownTrigger: {
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.md,
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.md,
+    backgroundColor: colors.borderLight,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: spacing.sm,
+  },
+  dropdownText: {
+    ...typography.bodySmall,
+    color: colors.text,
+    flex: 1,
+  },
+  placeholderText: {
+    color: colors.textMuted,
+  },
+  dropdownList: {
+    marginTop: spacing.xs,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.md,
+    overflow: 'hidden',
+    backgroundColor: colors.surface,
+  },
+  dropdownItem: {
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.md,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    borderBottomWidth: 1,
+    borderBottomColor: colors.borderLight,
+  },
+  dropdownItemText: {
+    ...typography.bodySmall,
+    color: colors.text,
+    flex: 1,
+  },
+  fieldLoaderWrap: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: spacing.lg,
+    gap: spacing.sm,
+  },
+  fieldLoaderText: {
+    ...typography.bodySmall,
+    color: colors.textMuted,
   },
   photoPreviewWrap: {
     position: 'relative',

@@ -25,6 +25,7 @@ import {
 interface StudentEditModalProps {
   visible: boolean;
   student: Student | null;
+  fieldKeys?: string[];
   onClose: () => void;
   onSubmit: (payload: StudentUpdatePayload) => Promise<void>;
 }
@@ -32,6 +33,7 @@ interface StudentEditModalProps {
 export default function StudentEditModal({
   visible,
   student,
+  fieldKeys = [],
   onClose,
   onSubmit,
 }: StudentEditModalProps) {
@@ -39,21 +41,31 @@ export default function StudentEditModal({
   const [loading, setLoading] = useState(false);
 
   const editEntries = student ? getStudentFormFieldEntries(student) : [];
+  const editFieldKeys = fieldKeys.length > 0 ? fieldKeys : editEntries.map(([key]) => key);
 
   useEffect(() => {
     if (visible && student) {
-      setForm(buildStudentEditForm(student));
+      const baseForm = buildStudentEditForm(student);
+      for (const key of fieldKeys) {
+        if (!(key in baseForm)) baseForm[key] = '';
+      }
+      setForm(baseForm);
     }
-  }, [visible, student]);
+  }, [visible, student, fieldKeys]);
 
   const updateCardField = (key: string, value: string) => {
     setForm((prev) => ({ ...prev, [key]: value }));
   };
 
+  const isMobileField = (key: string) => {
+    const field = key.toLowerCase();
+    return field.includes('mobile') || field.includes('phone') || field.includes('contact');
+  };
+
   const handleSubmit = async () => {
     if (!student) return;
 
-    if (editEntries.length === 0) {
+    if (editFieldKeys.length === 0) {
       Alert.alert('No fields', 'No student details available to update.');
       return;
     }
@@ -73,7 +85,7 @@ export default function StudentEditModal({
     if (!loading) onClose();
   };
 
-  const canSave = editEntries.length > 0;
+  const canSave = editFieldKeys.length > 0;
 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={handleClose}>
@@ -90,8 +102,8 @@ export default function StudentEditModal({
             keyboardShouldPersistTaps="handled"
             showsVerticalScrollIndicator={false}
           >
-            {editEntries.length > 0 ? (
-              editEntries.map(([key]) => (
+            {editFieldKeys.length > 0 ? (
+              editFieldKeys.map((key) => (
                 <View key={key} style={styles.field}>
                   <Text style={styles.label}>{formatCardLabel(key)}</Text>
                   <TextInput
@@ -101,6 +113,7 @@ export default function StudentEditModal({
                     placeholder={formatCardLabel(key)}
                     placeholderTextColor={colors.textMuted}
                     editable={!loading}
+                    keyboardType={isMobileField(key) ? 'number-pad' : 'default'}
                   />
                 </View>
               ))

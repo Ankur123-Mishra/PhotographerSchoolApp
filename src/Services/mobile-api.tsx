@@ -254,6 +254,14 @@ export async function getSchoolStudents() {
   return data;
 }
 
+/** Pending template students – GET api/school/students?templatePendingOnly=true with Bearer token. */
+export async function getSchoolPendingTemplateStudents() {
+  const path = `${mobile_siteConfig.SCHOOL_ENDPOINTS.STUDENTS}?templatePendingOnly=true`;
+  const response = await getDataWithToken(null, path);
+  const data = response?.data ?? response;
+  return data;
+}
+
 /** School-wide student search – GET api/school/students/global-search?search= with Bearer token. */
 export async function getSchoolStudentsGlobalSearch(search: string) {
   const q = encodeURIComponent(search.trim());

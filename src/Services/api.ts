@@ -4,6 +4,7 @@ import {
   getSchoolClasses,
   getSchoolDashboard,
   getSchoolStudents,
+  getSchoolPendingTemplateStudents,
   getSchoolStudentsGlobalSearch,
   getSchoolStudentDetail,
   getSchoolPreview,
@@ -313,6 +314,34 @@ export async function fetchStudentsByClass(classId: string): Promise<Student[]> 
   } catch {
     ensureMockData();
     return getMockStudents().filter((s) => s.classId === classId);
+  }
+}
+
+export async function fetchPendingTemplateStudents(): Promise<Student[]> {
+  try {
+    const res = (await getSchoolPendingTemplateStudents()) as { students?: ApiStudent[] };
+    const list = res?.students ?? [];
+    return list.map((s) => ({
+      id: s._id,
+      admissionNo: s.admissionNo,
+      mobile: s.mobile,
+      address: s.address,
+      name: s.studentName,
+      rollNo: s.rollNo ?? '',
+      className:
+        s.classId && typeof s.classId === 'object'
+          ? `${s.classId.className}${s.classId.section ? ' - ' + s.classId.section : ''}`
+          : '',
+      classId: s.classId && typeof s.classId === 'object' ? s.classId._id : (s.classId as unknown as string),
+      sectionName: s.classId && typeof s.classId === 'object' ? s.classId.section : undefined,
+      sectionId: s.classId && typeof s.classId === 'object' ? s.classId._id : undefined,
+      schoolId: s.schoolId,
+      schoolName: '',
+      status: mapApiStatus(s.status ?? 'pending'),
+    }));
+  } catch {
+    ensureMockData();
+    return getMockStudents().filter((s) => s.status === 'pending');
   }
 }
 

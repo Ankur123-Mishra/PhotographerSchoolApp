@@ -7,7 +7,12 @@ export type AuthStackParamList = {
 export type MainStackParamList = {
   Dashboard: undefined;
   ClassList: { autoFocusSearch?: boolean } | undefined;
-  StudentList: { classId: string; className: string };
+  StudentList: {
+    classId?: string;
+    className?: string;
+    listMode?: 'class' | 'pending';
+    title?: string;
+  };
   StudentDetail: { studentId: string };
   Preview: { studentId: string };
   Delivery: undefined;
