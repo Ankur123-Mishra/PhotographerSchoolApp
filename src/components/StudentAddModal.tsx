@@ -14,7 +14,8 @@ import {
   Image,
 } from 'react-native';
 import Ionicons from 'react-native-vector-icons/Ionicons';
-import { launchCamera, launchImageLibrary } from 'react-native-image-picker';
+import { launchImageLibrary } from 'react-native-image-picker';
+import PhotoCaptureModal from './PhotoCaptureModal';
 import { colors, spacing, radius, typography } from '../theme/colors';
 import {
   buildEmptyAddStudentForm,
@@ -46,6 +47,7 @@ export default function StudentAddModal({
 }: StudentAddModalProps) {
   const [form, setForm] = useState<Record<string, string>>({});
   const [photoUri, setPhotoUri] = useState<string | null>(null);
+  const [cameraVisible, setCameraVisible] = useState(false);
   const [loading, setLoading] = useState(false);
   const [classDropdownOpen, setClassDropdownOpen] = useState(false);
   const [selectedClassId, setSelectedClassId] = useState(classId);
@@ -53,6 +55,7 @@ export default function StudentAddModal({
   useEffect(() => {
     if (!visible) return;
     setClassDropdownOpen(false);
+    setPhotoUri(null);
     if (classOptions.length > 0) {
       if (classId) {
         setSelectedClassId(classId);
@@ -67,12 +70,18 @@ export default function StudentAddModal({
   useEffect(() => {
     if (visible && fieldKeys.length > 0) {
       setForm(buildEmptyAddStudentForm(fieldKeys));
-      setPhotoUri(null);
     }
   }, [visible, fieldKeys]);
 
+  const visibleFieldKeys = fieldKeys.filter((key) => !isRedundantClassField(key));
+
   const updateField = (key: string, value: string) => {
     setForm((prev) => ({ ...prev, [key]: value }));
+  };
+
+  const isMobileField = (key: string) => {
+    const field = key.toLowerCase();
+    return field.includes('mobile') || field.includes('phone') || field.includes('contact');
   };
 
   const onPickFromGallery = useCallback(async () => {
@@ -95,33 +104,17 @@ export default function StudentAddModal({
     }
   }, []);
 
-  const onTakePhoto = useCallback(async () => {
-    try {
-      const result = await launchCamera({
-        mediaType: 'photo',
-        quality: 0.9,
-        saveToPhotos: false,
-      });
-      if (result.didCancel) return;
-      if (result.errorCode) {
-        Alert.alert('Error', result.errorMessage || 'Failed to take photo.');
-        return;
-      }
-      const uri = result.assets?.[0]?.uri;
-      if (uri) setPhotoUri(uri);
-      else Alert.alert('Error', 'No photo captured.');
-    } catch {
-      Alert.alert('Error', 'Failed to open camera. Please try again.');
-    }
+  const onPhotoCapture = useCallback((uri: string) => {
+    setPhotoUri(uri);
   }, []);
 
   const onPhotoSourcePress = useCallback(() => {
     Alert.alert('Student Photo', 'Choose how you want to add the student photo', [
-      { text: 'Camera', onPress: onTakePhoto },
+      { text: 'Camera', onPress: () => setCameraVisible(true) },
       { text: 'Gallery', onPress: onPickFromGallery },
       { text: 'Cancel', style: 'cancel' },
     ]);
-  }, [onPickFromGallery, onTakePhoto]);
+  }, [onPickFromGallery]);
 
   const handleSubmit = async () => {
     const effectiveClassId = classOptions.length > 0 ? selectedClassId : classId;
@@ -165,6 +158,7 @@ export default function StudentAddModal({
     (classOptions.length === 0 || Boolean(selectedClassId));
 
   return (
+    <>
     <Modal visible={visible} transparent animationType="slide" onRequestClose={handleClose}>
       <KeyboardAvoidingView
         style={styles.overlay}
@@ -179,6 +173,33 @@ export default function StudentAddModal({
             keyboardShouldPersistTaps="handled"
             showsVerticalScrollIndicator={false}
           >
+            <View style={styles.field}>
+              <Text style={styles.label}>Student Photo</Text>
+              {photoUri ? (
+                <View style={styles.photoPreviewWrap}>
+                  <Image source={{ uri: photoUri }} style={styles.photoPreview} resizeMode="cover" />
+                  <TouchableOpacity
+                    style={styles.removePhotoBtn}
+                    onPress={() => setPhotoUri(null)}
+                    disabled={loading}
+                    activeOpacity={0.85}
+                  >
+                    <Ionicons name="close-circle" size={22} color={colors.error} />
+                  </TouchableOpacity>
+                </View>
+              ) : null}
+              <TouchableOpacity
+                style={styles.photoBtn}
+                onPress={onPhotoSourcePress}
+                disabled={loading}
+                activeOpacity={0.85}
+              >
+                <Ionicons name="camera-outline" size={20} color={colors.primary} />
+                <Text style={styles.photoBtnText}>
+                  {photoUri ? 'Change photo' : 'Upload student photo'}
+                </Text>
+              </TouchableOpacity>
+            </View>
             {classOptions.length > 0 ? (
               <View style={styles.field}>
                 <Text style={styles.label}>Class</Text>
@@ -225,40 +246,13 @@ export default function StudentAddModal({
                 ) : null}
               </View>
             ) : null}
-            <View style={styles.field}>
-              <Text style={styles.label}>Student Photo</Text>
-              {photoUri ? (
-                <View style={styles.photoPreviewWrap}>
-                  <Image source={{ uri: photoUri }} style={styles.photoPreview} resizeMode="cover" />
-                  <TouchableOpacity
-                    style={styles.removePhotoBtn}
-                    onPress={() => setPhotoUri(null)}
-                    disabled={loading}
-                    activeOpacity={0.85}
-                  >
-                    <Ionicons name="close-circle" size={22} color={colors.error} />
-                  </TouchableOpacity>
-                </View>
-              ) : null}
-              <TouchableOpacity
-                style={styles.photoBtn}
-                onPress={onPhotoSourcePress}
-                disabled={loading}
-                activeOpacity={0.85}
-              >
-                <Ionicons name="camera-outline" size={20} color={colors.primary} />
-                <Text style={styles.photoBtnText}>
-                  {photoUri ? 'Change photo' : 'Upload student photo'}
-                </Text>
-              </TouchableOpacity>
-            </View>
             {loadingFields ? (
               <View style={styles.fieldLoaderWrap}>
                 <ActivityIndicator color={colors.primary} />
                 <Text style={styles.fieldLoaderText}>Loading form fields...</Text>
               </View>
-            ) : fieldKeys.length > 0 ? (
-              fieldKeys.map((key) => (
+            ) : visibleFieldKeys.length > 0 ? (
+              visibleFieldKeys.map((key) => (
                 <View key={key} style={styles.field}>
                   <Text style={styles.label}>{formatCardLabel(key)}</Text>
                   <TextInput
@@ -268,6 +262,7 @@ export default function StudentAddModal({
                     placeholder={formatCardLabel(key)}
                     placeholderTextColor={colors.textMuted}
                     editable={!loading}
+                    keyboardType={isMobileField(key) ? 'number-pad' : 'default'}
                   />
                 </View>
               ))
@@ -300,11 +295,23 @@ export default function StudentAddModal({
         </View>
       </KeyboardAvoidingView>
     </Modal>
+
+      <PhotoCaptureModal
+        visible={cameraVisible}
+        onClose={() => setCameraVisible(false)}
+        onPhotoCapture={onPhotoCapture}
+      />
+    </>
   );
 }
 
 function normalizeKey(key: string): string {
   return key.toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+
+function isRedundantClassField(key: string): boolean {
+  const norm = normalizeKey(key);
+  return norm === 'class' || norm === 'classname' || norm === 'standard' || norm === 'grade';
 }
 
 const styles = StyleSheet.create({
