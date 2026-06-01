@@ -11,6 +11,7 @@ import {
   ScrollView,
   KeyboardAvoidingView,
   Platform,
+  useWindowDimensions,
 } from 'react-native';
 import { colors, spacing, radius, typography } from '../theme/colors';
 import type { Student, StudentUpdatePayload } from '../types';
@@ -37,6 +38,8 @@ export default function StudentEditModal({
   onClose,
   onSubmit,
 }: StudentEditModalProps) {
+  const { width: screenWidth } = useWindowDimensions();
+  const isCompact = screenWidth < 380;
   const [form, setForm] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(false);
 
@@ -93,7 +96,7 @@ export default function StudentEditModal({
         style={styles.overlay}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
-        <View style={styles.box}>
+        <View style={[styles.box, isCompact && styles.boxCompact]}>
           <Text style={styles.title}>Edit Student</Text>
           <Text style={styles.subtitle}>Update ID card details</Text>
           <ScrollView
@@ -123,15 +126,17 @@ export default function StudentEditModal({
           </ScrollView>
           <View style={styles.actions}>
             <TouchableOpacity
-              style={[styles.btn, styles.cancelBtn]}
+              style={[styles.btn, styles.cancelBtn, isCompact && styles.btnCompact]}
               onPress={handleClose}
               disabled={loading}
               activeOpacity={0.85}
             >
-              <Text style={styles.cancelText}>Cancel</Text>
+              <Text style={[styles.cancelText, isCompact && styles.btnTextCompact]} numberOfLines={1}>
+                Cancel
+              </Text>
             </TouchableOpacity>
             <TouchableOpacity
-              style={[styles.btn, styles.submitBtn]}
+              style={[styles.btn, styles.submitBtn, isCompact && styles.btnCompact]}
               onPress={handleSubmit}
               disabled={loading || !canSave}
               activeOpacity={0.85}
@@ -139,7 +144,9 @@ export default function StudentEditModal({
               {loading ? (
                 <ActivityIndicator color={colors.textInverse} size="small" />
               ) : (
-                <Text style={styles.submitText}>Save</Text>
+                <Text style={[styles.submitText, isCompact && styles.btnTextCompact]} numberOfLines={1}>
+                  Save
+                </Text>
               )}
             </TouchableOpacity>
           </View>
@@ -163,6 +170,12 @@ const styles = StyleSheet.create({
     paddingTop: spacing.xxl,
     paddingBottom: spacing.section,
     maxHeight: '92%',
+    width: '100%',
+  },
+  boxCompact: {
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.lg,
+    paddingBottom: spacing.xl,
   },
   title: {
     ...typography.heading,
@@ -204,9 +217,18 @@ const styles = StyleSheet.create({
   },
   btn: {
     flex: 1,
-    paddingVertical: spacing.lg,
+    minWidth: 0,
+    minHeight: 48,
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.md,
     borderRadius: radius.md,
     alignItems: 'center',
+    justifyContent: 'center',
+  },
+  btnCompact: {
+    minHeight: 44,
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.sm,
   },
   cancelBtn: {
     backgroundColor: colors.borderLight,
@@ -217,9 +239,17 @@ const styles = StyleSheet.create({
   cancelText: {
     ...typography.bodyMedium,
     color: colors.textSecondary,
+    textAlign: 'center',
+    lineHeight: 22,
   },
   submitText: {
     ...typography.bodyMedium,
     color: colors.textInverse,
+    textAlign: 'center',
+    lineHeight: 22,
+  },
+  btnTextCompact: {
+    fontSize: 14,
+    lineHeight: 20,
   },
 });
