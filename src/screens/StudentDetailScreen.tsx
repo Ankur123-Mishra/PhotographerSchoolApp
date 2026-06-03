@@ -1,4 +1,4 @@
-import React, { useCallback, useState, useEffect, useLayoutEffect } from 'react';
+import React, { useCallback, useState, useEffect, useLayoutEffect, useMemo } from 'react';
 import {
   View,
   Text,
@@ -16,7 +16,7 @@ import { launchImageLibrary } from 'react-native-image-picker';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useStudents } from '../context/StudentContext';
-import StatusBadge from '../components/StatusBadge';
+// import StatusBadge from '../components/StatusBadge';
 import CorrectionModal from '../components/CorrectionModal';
 import PhotoCaptureModal from '../components/PhotoCaptureModal';
 import StudentEditModal from '../components/StudentEditModal';
@@ -26,8 +26,9 @@ import type { Student, StudentUpdatePayload } from '../types';
 import { colors, spacing, radius, typography, shadow } from '../theme/colors';
 import { PutDataWithToken, uploadPhoto } from '../Services/mobile-api';
 import { mobile_siteConfig } from '../Services/mobile-siteConfig';
-import { resolveAddStudentFieldKeys, updateStudent } from '../Services/api';
+import { resolveAddStudentFieldKeys, updateStudent, fetchStudentsByClass } from '../Services/api';
 import { formatCardLabel, getCardFieldEntries, getStudentDisplayName } from '../utils/cardFields';
+import { sortClassItems } from '../utils/classSort';
 import Images from '../assets/image';
 
 type Nav = NativeStackNavigationProp<MainStackParamList, 'StudentDetail'>;
@@ -51,13 +52,16 @@ export default function StudentDetailScreen() {
   const { params } = useRoute<DetailRoute>();
   const { studentId } = params;
   const navigation = useNavigation<Nav>();
-  const { getStudentDetail, raiseStudentCorrection, setError } = useStudents();
+  const { getStudentDetail, raiseStudentCorrection, setError, classes, refreshClasses } = useStudents();
   const [student, setStudent] = useState<Student | null>(null);
   const [loading, setLoading] = useState(true);
   const [correctionVisible, setCorrectionVisible] = useState(false);
   const [editVisible, setEditVisible] = useState(false);
   const [cameraVisible, setCameraVisible] = useState(false);
   const [editFieldKeys, setEditFieldKeys] = useState<string[]>([]);
+  const [editClassId, setEditClassId] = useState('');
+  const [editFieldsLoading, setEditFieldsLoading] = useState(false);
+  const sortedClasses = useMemo(() => sortClassItems(classes), [classes]);
   const [photoError, setPhotoError] = useState(false);
   const [markingReceived, setMarkingReceived] = useState(false);
   /** Local file URI after capture; cleared after successful server upload */
@@ -95,6 +99,21 @@ export default function StudentDetailScreen() {
     [studentId, load, setError],
   );
 
+  const onClassChangeForEdit = useCallback(async (classId: string) => {
+    if (editFieldsLoading || !classId) return;
+    setEditClassId(classId);
+    setEditFieldsLoading(true);
+    try {
+      const classStudents = await fetchStudentsByClass(classId);
+      const keys = await resolveAddStudentFieldKeys(classStudents);
+      setEditFieldKeys(keys);
+    } catch (e) {
+      Alert.alert('Error', (e as Error).message || 'Could not load form fields');
+    } finally {
+      setEditFieldsLoading(false);
+    }
+  }, [editFieldsLoading]);
+
   useLayoutEffect(() => {
     if (!student) {
       navigation.setOptions({ headerRight: undefined });
@@ -103,8 +122,12 @@ export default function StudentDetailScreen() {
     navigation.setOptions({
       headerRight: () => (
         <TouchableOpacity
-          onPress={() => {
+          onPress={async () => {
             if (!student) return;
+            if (sortedClasses.length === 0) {
+              await refreshClasses();
+            }
+            setEditClassId(student.classId);
             setEditFieldKeys([]);
             resolveAddStudentFieldKeys([student])
               .then((keys) => setEditFieldKeys(keys))
@@ -120,7 +143,7 @@ export default function StudentDetailScreen() {
         </TouchableOpacity>
       ),
     });
-  }, [navigation, student]);
+  }, [navigation, student, sortedClasses.length, refreshClasses]);
 
   const onRaiseCorrection = async (reason: string) => {
     await raiseStudentCorrection(studentId, reason);
@@ -300,9 +323,9 @@ export default function StudentDetailScreen() {
           <Text style={[styles.name, isCompact && styles.nameCompact]} numberOfLines={3}>
             {displayName}
           </Text>
-          <View style={styles.badgeWrap}>
+          {/* <View style={styles.badgeWrap}>
             <StatusBadge status={student.status} size={isCompact ? 'small' : 'medium'} />
-          </View>
+          </View> */}
         </View>
         {cardFields.length > 0 ? (
           cardFields
@@ -386,6 +409,10 @@ export default function StudentDetailScreen() {
         visible={editVisible}
         student={student}
         fieldKeys={editFieldKeys}
+        classId={editClassId}
+        classOptions={sortedClasses}
+        onClassChange={onClassChangeForEdit}
+        loadingFields={editFieldsLoading}
         onClose={() => setEditVisible(false)}
         onSubmit={onSaveStudent}
       />

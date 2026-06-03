@@ -116,20 +116,23 @@ export default function StudentListScreen() {
     [classId, loadStudentsByClass, refreshDashboard],
   );
 
+  const pendingCount = students.length;
+
   useLayoutEffect(() => {
+    if (!isPendingMode) {
+      navigation.setOptions({ headerRight: undefined });
+      return;
+    }
+
     navigation.setOptions({
-      // headerRight: () => (
-      //   <TouchableOpacity
-      //     onPress={onOpenAddStudent}
-      //     style={{ marginRight: spacing.sm }}
-      //     hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-      //     activeOpacity={0.7}
-      //   >
-      //     <Ionicons name="person-add-outline" size={24} color={colors.primary} />
-      //   </TouchableOpacity>
-      // ),
+      headerRight: () => (
+        <View style={styles.headerCountBadge}>
+          <Text style={styles.headerCountNumber}>{pendingCount}</Text>
+          <Text style={styles.headerCountLabel}>Pending</Text>
+        </View>
+      ),
     });
-  }, [navigation, onOpenAddStudent]);
+  }, [navigation, isPendingMode, pendingCount]);
 
   if (loading && students.length === 0) {
     return <Loader message="Loading students..." />;
@@ -152,7 +155,7 @@ export default function StudentListScreen() {
             setFilterVisible(true);
           }}
         >
-          <Ionicons name="filter" size={18} color={filterStatus !== 'all' ? colors.textInverse : colors.textSecondary} />
+          <Ionicons name="filter" size={18} color={colors.textSecondary} />
           <Text style={[styles.filterBtnText, filterStatus !== 'all' && styles.filterBtnTextActive]}>
             {filterStatus === 'all' ? 'Filter' : 'Filtered'}
           </Text>
@@ -214,14 +217,36 @@ const styles = StyleSheet.create({
     marginBottom: spacing.md,
   },
   filterBtnActive: {
-    backgroundColor: colors.primary,
+    // backgroundColor: colors.primary,
   },
   filterBtnText: { ...typography.bodySmall, fontWeight: '600', color: colors.textSecondary },
-  filterBtnTextActive: { color: colors.textInverse },
+  filterBtnTextActive: { 
+    // color: colors.textInverse 
+  },
   list: { padding: spacing.lg, paddingBottom: spacing.section },
   empty: {
     padding: spacing.xxl,
     alignItems: 'center',
   },
   emptyText: { ...typography.bodySmall, color: colors.textMuted, marginTop: spacing.md },
+  headerCountBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    backgroundColor: colors.warningBg,
+    borderRadius: radius.md,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs,
+    marginRight: spacing.sm,
+  },
+  headerCountNumber: {
+    ...typography.bodySmall,
+    fontWeight: '700',
+    color: colors.warning,
+  },
+  headerCountLabel: {
+    ...typography.caption,
+    fontWeight: '600',
+    color: colors.warning,
+  },
 });

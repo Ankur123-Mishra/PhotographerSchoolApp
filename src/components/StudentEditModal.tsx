@@ -13,8 +13,9 @@ import {
   Platform,
   useWindowDimensions,
 } from 'react-native';
+import Ionicons from 'react-native-vector-icons/Ionicons';
 import { colors, spacing, radius, typography } from '../theme/colors';
-import type { Student, StudentUpdatePayload } from '../types';
+import type { ClassItem, Student, StudentUpdatePayload } from '../types';
 import {
   buildStudentEditForm,
   cardFormToUpdatePayload,
@@ -27,14 +28,31 @@ interface StudentEditModalProps {
   visible: boolean;
   student: Student | null;
   fieldKeys?: string[];
+  classId?: string;
+  classOptions?: ClassItem[];
+  onClassChange?: (classId: string) => void | Promise<void>;
+  loadingFields?: boolean;
   onClose: () => void;
   onSubmit: (payload: StudentUpdatePayload) => Promise<void>;
+}
+
+function normalizeKey(key: string): string {
+  return key.toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+
+function isRedundantClassField(key: string): boolean {
+  const norm = normalizeKey(key);
+  return norm === 'class' || norm === 'classname' || norm === 'standard' || norm === 'grade';
 }
 
 export default function StudentEditModal({
   visible,
   student,
   fieldKeys = [],
+  classId = '',
+  classOptions = [],
+  onClassChange,
+  loadingFields = false,
   onClose,
   onSubmit,
 }: StudentEditModalProps) {
@@ -42,9 +60,17 @@ export default function StudentEditModal({
   const isCompact = screenWidth < 380;
   const [form, setForm] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(false);
+  const [classDropdownOpen, setClassDropdownOpen] = useState(false);
+  const [selectedClassId, setSelectedClassId] = useState(classId);
 
   const editEntries = student ? getStudentFormFieldEntries(student) : [];
   const editFieldKeys = fieldKeys.length > 0 ? fieldKeys : editEntries.map(([key]) => key);
+
+  useEffect(() => {
+    if (!visible) return;
+    setClassDropdownOpen(false);
+    setSelectedClassId(classId || student?.classId || '');
+  }, [visible]);
 
   useEffect(() => {
     if (visible && student) {
@@ -55,6 +81,8 @@ export default function StudentEditModal({
       setForm(baseForm);
     }
   }, [visible, student, fieldKeys]);
+
+  const visibleFieldKeys = editFieldKeys.filter((key) => !isRedundantClassField(key));
 
   const updateCardField = (key: string, value: string) => {
     setForm((prev) => ({ ...prev, [key]: value }));
@@ -72,7 +100,19 @@ export default function StudentEditModal({
       Alert.alert('No fields', 'No student details available to update.');
       return;
     }
-    const payload = cardFormToUpdatePayload(form, studentToBasePayload(student));
+    const effectiveClassId = classOptions.length > 0 ? selectedClassId : (student.classId ?? '');
+    if (classOptions.length > 0 && !effectiveClassId) {
+      Alert.alert('Required', 'Please select a class.');
+      return;
+    }
+
+    const filteredForm = Object.fromEntries(
+      Object.entries(form).filter(([key]) => !isRedundantClassField(key)),
+    );
+    const payload = cardFormToUpdatePayload(filteredForm, studentToBasePayload(student));
+    if (effectiveClassId && effectiveClassId !== student.classId) {
+      payload.classId = effectiveClassId;
+    }
     setLoading(true);
     try {
       await onSubmit(payload);
@@ -88,7 +128,14 @@ export default function StudentEditModal({
     if (!loading) onClose();
   };
 
-  const canSave = editFieldKeys.length > 0;
+  const selectedClassName =
+    classOptions.find((item) => item.id === selectedClassId)?.name ??
+    student?.className ??
+    'Select class';
+  const canSave =
+    editFieldKeys.length > 0 &&
+    !loading &&
+    (classOptions.length === 0 || Boolean(selectedClassId));
 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={handleClose}>
@@ -105,8 +152,59 @@ export default function StudentEditModal({
             keyboardShouldPersistTaps="handled"
             showsVerticalScrollIndicator={false}
           >
-            {editFieldKeys.length > 0 ? (
-              editFieldKeys.map((key) => (
+            {classOptions.length > 0 ? (
+              <View style={styles.field}>
+                <Text style={styles.label}>Class</Text>
+                <TouchableOpacity
+                  style={styles.dropdownTrigger}
+                  onPress={() => setClassDropdownOpen((prev) => !prev)}
+                  disabled={loading || loadingFields}
+                  activeOpacity={0.85}
+                >
+                  <Text style={[styles.dropdownText, !selectedClassId && styles.placeholderText]}>
+                    {selectedClassName}
+                  </Text>
+                  {loadingFields ? (
+                    <ActivityIndicator color={colors.primary} size="small" />
+                  ) : (
+                    <Ionicons
+                      name={classDropdownOpen ? 'chevron-up' : 'chevron-down'}
+                      size={18}
+                      color={colors.textMuted}
+                    />
+                  )}
+                </TouchableOpacity>
+                {classDropdownOpen ? (
+                  <View style={styles.dropdownList}>
+                    {classOptions.map((item) => (
+                      <TouchableOpacity
+                        key={item.id}
+                        style={styles.dropdownItem}
+                        onPress={() => {
+                          setSelectedClassId(item.id);
+                          setClassDropdownOpen(false);
+                          onClassChange?.(item.id);
+                        }}
+                        disabled={loading || loadingFields}
+                        activeOpacity={0.85}
+                      >
+                        <Text style={styles.dropdownItemText}>{item.name}</Text>
+                        {selectedClassId === item.id ? (
+                          <Ionicons name="checkmark" size={18} color={colors.primary} />
+                        ) : null}
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                ) : null}
+              </View>
+            ) : null}
+            {loadingFields ? (
+              <View style={styles.fieldLoaderWrap}>
+                <ActivityIndicator color={colors.primary} />
+                <Text style={styles.fieldLoaderText}>Loading form fields...</Text>
+              </View>
+            ) : visibleFieldKeys.length > 0 ? (
+              visibleFieldKeys.map((key) => (
                 <View key={key} style={styles.field}>
                   <Text style={styles.label}>{formatCardLabel(key)}</Text>
                   <TextInput
@@ -120,9 +218,9 @@ export default function StudentEditModal({
                   />
                 </View>
               ))
-            ) : (
+            ) : editFieldKeys.length === 0 ? (
               <Text style={styles.empty}>No card details available</Text>
-            )}
+            ) : null}
           </ScrollView>
           <View style={styles.actions}>
             <TouchableOpacity
@@ -203,6 +301,58 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: colors.text,
     backgroundColor: colors.borderLight,
+  },
+  dropdownTrigger: {
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.md,
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.md,
+    backgroundColor: colors.borderLight,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: spacing.sm,
+  },
+  dropdownText: {
+    ...typography.bodySmall,
+    color: colors.text,
+    flex: 1,
+  },
+  placeholderText: {
+    color: colors.textMuted,
+  },
+  dropdownList: {
+    marginTop: spacing.xs,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.md,
+    overflow: 'hidden',
+    backgroundColor: colors.surface,
+  },
+  dropdownItem: {
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.md,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    borderBottomWidth: 1,
+    borderBottomColor: colors.borderLight,
+  },
+  dropdownItemText: {
+    ...typography.bodySmall,
+    color: colors.text,
+    flex: 1,
+  },
+  fieldLoaderWrap: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: spacing.lg,
+    gap: spacing.sm,
+  },
+  fieldLoaderText: {
+    ...typography.bodySmall,
+    color: colors.textMuted,
   },
   empty: {
     ...typography.bodySmall,
