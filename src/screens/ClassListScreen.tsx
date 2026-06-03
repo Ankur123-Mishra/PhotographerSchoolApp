@@ -124,6 +124,7 @@ export default function ClassListScreen() {
           <FlatList
             data={searchResults}
             keyExtractor={(item) => item.id}
+            keyboardShouldPersistTaps="handled"
             contentContainerStyle={styles.list}
             renderItem={({ item }) => (
               <StudentCard
@@ -146,6 +147,7 @@ export default function ClassListScreen() {
       <FlatList
         data={sortedClasses}
         keyExtractor={(item) => item.id}
+        keyboardShouldPersistTaps="handled"
         contentContainerStyle={styles.list}
         renderItem={({ item }) => (
           <TouchableOpacity

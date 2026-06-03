@@ -4,6 +4,7 @@ import {
   fetchDashboardStats,
   fetchClasses,
   fetchStudentsByClass,
+  fetchPendingTemplateStudents,
   fetchStudentDetail,
   fetchDeliveryList,
   approvePreview,
@@ -25,6 +26,7 @@ interface StudentContextType extends StudentState {
   refreshDashboard: () => Promise<void>;
   refreshClasses: () => Promise<void>;
   loadStudentsByClass: (classId: string) => Promise<void>;
+  loadPendingStudents: () => Promise<void>;
   getStudentDetail: (id: string) => Promise<Student | null>;
   refreshDeliveryList: () => Promise<void>;
   approveStudentPreview: (studentId: string) => Promise<void>;
@@ -92,6 +94,21 @@ export function StudentProvider({ children }: { children: React.ReactNode }) {
     setState((s) => ({ ...s, loading: true, error: null }));
     try {
       const students = await fetchStudentsByClass(classId);
+      setState((s) => ({ ...s, students, loading: false }));
+    } catch (e) {
+      setState((s) => ({
+        ...s,
+        loading: false,
+        error: (e as Error).message,
+        students: [],
+      }));
+    }
+  }, []);
+
+  const loadPendingStudents = useCallback(async () => {
+    setState((s) => ({ ...s, loading: true, error: null }));
+    try {
+      const students = await fetchPendingTemplateStudents();
       setState((s) => ({ ...s, students, loading: false }));
     } catch (e) {
       setState((s) => ({
@@ -179,6 +196,7 @@ export function StudentProvider({ children }: { children: React.ReactNode }) {
     refreshDashboard,
     refreshClasses,
     loadStudentsByClass,
+    loadPendingStudents,
     getStudentDetail,
     refreshDeliveryList,
     approveStudentPreview,

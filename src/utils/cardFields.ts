@@ -74,7 +74,7 @@ const EMPTY_PAYLOAD: StudentUpdatePayload = {
 };
 
 const PAYLOAD_FIELD_FORM_KEYS: Record<
-  keyof Omit<StudentUpdatePayload, 'extraFields'>,
+  keyof Omit<StudentUpdatePayload, 'extraFields' | 'classId'>,
   string
 > = {
   studentName: 'studentName',
@@ -93,7 +93,7 @@ const PAYLOAD_FIELD_FORM_KEYS: Record<
 
 function cardFormCoversPayloadField(
   cardForm: Record<string, string>,
-  payloadField: keyof Omit<StudentUpdatePayload, 'extraFields'>,
+  payloadField: keyof Omit<StudentUpdatePayload, 'extraFields' | 'classId'>,
 ): boolean {
   return Object.keys(cardForm).some(
     (key) => CARD_KEY_TO_PAYLOAD[normalizeKey(key)] === payloadField,

@@ -1,4 +1,4 @@
-import React, { useCallback, useState, useEffect, useLayoutEffect } from 'react';
+import React, { useCallback, useState, useEffect, useLayoutEffect, useMemo } from 'react';
 import {
   View,
   Text,
@@ -9,13 +9,14 @@ import {
   Alert,
   ActivityIndicator,
   Linking,
+  useWindowDimensions,
 } from 'react-native';
 import Ionicons from 'react-native-vector-icons/Ionicons';
 import { launchImageLibrary } from 'react-native-image-picker';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useStudents } from '../context/StudentContext';
-import StatusBadge from '../components/StatusBadge';
+// import StatusBadge from '../components/StatusBadge';
 import CorrectionModal from '../components/CorrectionModal';
 import PhotoCaptureModal from '../components/PhotoCaptureModal';
 import CropFrameSelectModal from '../components/CropFrameSelectModal';
@@ -28,11 +29,14 @@ import type { Student, StudentUpdatePayload } from '../types';
 import { colors, spacing, radius, typography, shadow } from '../theme/colors';
 import { PutDataWithToken, uploadPhoto } from '../Services/mobile-api';
 import { mobile_siteConfig } from '../Services/mobile-siteConfig';
-import { updateStudent } from '../Services/api';
+import { resolveAddStudentFieldKeys, updateStudent, fetchStudentsByClass } from '../Services/api';
 import { formatCardLabel, getCardFieldEntries, getStudentDisplayName } from '../utils/cardFields';
+import { sortClassItems } from '../utils/classSort';
+import Images from '../assets/image';
 
 type Nav = NativeStackNavigationProp<MainStackParamList, 'StudentDetail'>;
 type DetailRoute = RouteProp<MainStackParamList, 'StudentDetail'>;
+type PhotoPickSource = 'camera' | 'gallery';
 
 function getCardFieldIcon(key: string): string {
   const k = key.toLowerCase();
@@ -47,17 +51,24 @@ function getCardFieldIcon(key: string): string {
 }
 
 export default function StudentDetailScreen() {
+  const { width: screenWidth } = useWindowDimensions();
+  const isCompact = screenWidth < 380;
   const { params } = useRoute<DetailRoute>();
   const { studentId } = params;
   const navigation = useNavigation<Nav>();
-  const { getStudentDetail, raiseStudentCorrection, setError } = useStudents();
+  const { getStudentDetail, raiseStudentCorrection, setError, classes, refreshClasses } = useStudents();
   const [student, setStudent] = useState<Student | null>(null);
   const [loading, setLoading] = useState(true);
   const [correctionVisible, setCorrectionVisible] = useState(false);
   const [editVisible, setEditVisible] = useState(false);
   const [frameSelectVisible, setFrameSelectVisible] = useState(false);
+  const [photoPickSource, setPhotoPickSource] = useState<PhotoPickSource | null>(null);
   const [selectedCropFrame, setSelectedCropFrame] = useState<CropFrameType | null>(null);
   const [cameraVisible, setCameraVisible] = useState(false);
+  const [editFieldKeys, setEditFieldKeys] = useState<string[]>([]);
+  const [editClassId, setEditClassId] = useState('');
+  const [editFieldsLoading, setEditFieldsLoading] = useState(false);
+  const sortedClasses = useMemo(() => sortClassItems(classes), [classes]);
   const [photoError, setPhotoError] = useState(false);
   const [markingReceived, setMarkingReceived] = useState(false);
   /** Local file URI after capture; cleared after successful server upload */
@@ -68,6 +79,7 @@ export default function StudentDetailScreen() {
     setLoading(true);
     setPhotoError(false);
     const s = await getStudentDetail(studentId);
+    console.log('=== s === ', s);
     setStudent(s);
     setLoading(false);
   }, [studentId, getStudentDetail]);
@@ -94,6 +106,21 @@ export default function StudentDetailScreen() {
     [studentId, load, setError],
   );
 
+  const onClassChangeForEdit = useCallback(async (classId: string) => {
+    if (editFieldsLoading || !classId) return;
+    setEditClassId(classId);
+    setEditFieldsLoading(true);
+    try {
+      const classStudents = await fetchStudentsByClass(classId);
+      const keys = await resolveAddStudentFieldKeys(classStudents);
+      setEditFieldKeys(keys);
+    } catch (e) {
+      Alert.alert('Error', (e as Error).message || 'Could not load form fields');
+    } finally {
+      setEditFieldsLoading(false);
+    }
+  }, [editFieldsLoading]);
+
   useLayoutEffect(() => {
     if (!student) {
       navigation.setOptions({ headerRight: undefined });
@@ -102,15 +129,28 @@ export default function StudentDetailScreen() {
     navigation.setOptions({
       headerRight: () => (
         <TouchableOpacity
-          onPress={() => setEditVisible(true)}
-          style={{ marginRight: spacing.sm }}
+          onPress={async () => {
+            if (!student) return;
+            if (sortedClasses.length === 0) {
+              await refreshClasses();
+            }
+            setEditClassId(student.classId);
+            setEditFieldKeys([]);
+            resolveAddStudentFieldKeys([student])
+              .then((keys) => setEditFieldKeys(keys))
+              .catch(() => setEditFieldKeys([]))
+              .finally(() => setEditVisible(true));
+          }}
+          style={styles.headerEditButton}
           hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
         >
-          <Ionicons name="create-outline" size={24} color={colors.primary} />
+          <Text style={styles.headerEditButtonText} numberOfLines={1}>
+            Edit
+          </Text>
         </TouchableOpacity>
       ),
     });
-  }, [navigation, student]);
+  }, [navigation, student, sortedClasses.length, refreshClasses]);
 
   const onRaiseCorrection = async (reason: string) => {
     await raiseStudentCorrection(studentId, reason);
@@ -180,6 +220,11 @@ export default function StudentDetailScreen() {
     setCameraVisible(false);
   }, []);
 
+  const openFrameSelect = useCallback((source: PhotoPickSource) => {
+    setPhotoPickSource(source);
+    setFrameSelectVisible(true);
+  }, []);
+
   const onPickFromGallery = useCallback(
     async (frameType: CropFrameType) => {
       try {
@@ -197,15 +242,14 @@ export default function StudentDetailScreen() {
         }
 
         const uri = result.assets?.[0]?.uri;
-        if (!uri) {
+        if (uri) {
+          const croppedUri = await cropImageToFrame(uri, frameType);
+          onPhotoCapture(croppedUri);
+        } else {
           Alert.alert('Error', 'No image selected.');
-          return;
         }
-
-        const croppedUri = await cropImageToFrame(uri, frameType);
-        onPhotoCapture(croppedUri);
       } catch {
-        Alert.alert('Error', 'Failed to process gallery image. Please try again.');
+        Alert.alert('Error', 'Failed to open gallery. Please try again.');
       }
     },
     [onPhotoCapture],
@@ -213,24 +257,20 @@ export default function StudentDetailScreen() {
 
   const onFrameSelected = useCallback(
     (frameType: CropFrameType) => {
-      setSelectedCropFrame(frameType);
+      const source = photoPickSource;
       setFrameSelectVisible(false);
-      Alert.alert(
-        'Add Photo',
-        'Capture or upload a photo using the selected frame',
-        [
-          { text: 'Camera', onPress: () => setCameraVisible(true) },
-          { text: 'Gallery', onPress: () => onPickFromGallery(frameType) },
-          { text: 'Cancel', style: 'cancel', onPress: () => setSelectedCropFrame(null) },
-        ],
-      );
-    },
-    [onPickFromGallery],
-  );
+      setPhotoPickSource(null);
+      setSelectedCropFrame(frameType);
 
-  const onPhotoSourcePress = useCallback(() => {
-    setFrameSelectVisible(true);
-  }, []);
+      if (source === 'camera') {
+        setCameraVisible(true);
+      } else if (source === 'gallery') {
+        setSelectedCropFrame(null);
+        void onPickFromGallery(frameType);
+      }
+    },
+    [photoPickSource, onPickFromGallery],
+  );
 
   const onUploadPendingPhoto = useCallback(async () => {
     if (!pendingPhotoUri || uploadingPhoto) return;
@@ -273,26 +313,24 @@ export default function StudentDetailScreen() {
   const displayName = getStudentDisplayName(student);
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.content}>
+    <ScrollView style={styles.container} contentContainerStyle={[styles.content, isCompact && styles.contentCompact]}>
       <View style={styles.photoContainer}>
-        {displayPhotoUri && !photoError ? (
-          <Image
-            source={{ uri: displayPhotoUri }}
-            style={styles.photo}
-            resizeMode="contain"
-            onError={() => setPhotoError(true)}
-          />
-        ) : (
-          <View style={styles.photoPlaceholder}>
-            <Ionicons name="person" size={56} color={colors.textMuted} />
-            <Text style={styles.photoPlaceholderText}>
-              {displayPhotoUri && photoError ? 'Photo failed to load' : 'No photo'}
-            </Text>
-          </View>
-        )}
+        <Image
+          source={displayPhotoUri && !photoError ? { uri: displayPhotoUri } : Images.ABSENT}
+          style={[styles.photo, { height: Math.min(220, screenWidth * 0.55) }]}
+          resizeMode="contain"
+          onError={() => setPhotoError(true)}
+        />
+        <TouchableOpacity
+          style={[styles.uploadBtn, styles.uploadBtnLeft]}
+          onPress={() => openFrameSelect('gallery')}
+          activeOpacity={0.8}
+        >
+          <Ionicons name="images" size={24} color="white" />
+        </TouchableOpacity>
         <TouchableOpacity
           style={styles.uploadBtn}
-          onPress={onPhotoSourcePress}
+          onPress={() => openFrameSelect('camera')}
           activeOpacity={0.8}
         >
           <Ionicons name="camera" size={24} color="white" />
@@ -310,15 +348,19 @@ export default function StudentDetailScreen() {
           ) : (
             <Ionicons name="cloud-upload-outline" size={22} color={colors.textInverse} />
           )}
-          <Text style={styles.uploadPhotoBtnText}>
+          <Text style={[styles.uploadPhotoBtnText, isCompact && styles.textCompact]} numberOfLines={2}>
             {uploadingPhoto ? 'Uploading...' : 'Upload photo'}
           </Text>
         </TouchableOpacity>
       ) : null}
       <View style={styles.card}>
         <View style={styles.cardHeader}>
-          <Text style={styles.name}>{displayName}</Text>
-          <StatusBadge status={student.status} />
+          <Text style={[styles.name, isCompact && styles.nameCompact]} numberOfLines={3}>
+            {displayName}
+          </Text>
+          {/* <View style={styles.badgeWrap}>
+            <StatusBadge status={student.status} size={isCompact ? 'small' : 'medium'} />
+          </View> */}
         </View>
         {cardFields.length > 0 ? (
           cardFields
@@ -330,7 +372,7 @@ export default function StudentDetailScreen() {
                   size={18}
                   color={colors.textMuted}
                 />
-                <Text style={styles.meta}>
+                <Text style={[styles.meta, isCompact && styles.textCompact]}>
                   {formatCardLabel(key)}: {String(value)}
                 </Text>
               </View>
@@ -342,25 +384,29 @@ export default function StudentDetailScreen() {
       {student.correctionReason ? (
         <View style={styles.card}>
           <Text style={styles.label}>Correction reason</Text>
-          <Text style={styles.reason}>{student.correctionReason}</Text>
+          <Text style={[styles.reason, isCompact && styles.textCompact]}>{student.correctionReason}</Text>
         </View>
       ) : null}
       <View style={styles.actions}>
         {canMarkReceived && (
           <TouchableOpacity
-            style={[styles.btn, markingReceived && styles.btnDisabled]}
+            style={[styles.btn, isCompact && styles.btnCompact, markingReceived && styles.btnDisabled]}
             onPress={onMarkReceived}
             disabled={markingReceived}
             activeOpacity={0.85}
           >
-            <Ionicons name="checkmark-done" size={20} color={colors.textInverse} />
-            <Text style={styles.btnText}>{markingReceived ? 'Marking...' : 'Received'}</Text>
+            <Ionicons name="checkmark-done" size={isCompact ? 18 : 20} color={colors.textInverse} />
+            <Text style={[styles.btnText, isCompact && styles.btnTextCompact]} numberOfLines={2}>
+              {markingReceived ? 'Marking...' : 'Received'}
+            </Text>
           </TouchableOpacity>
         )}
         {canViewPreview && (
-          <TouchableOpacity style={styles.btn} onPress={onViewPreview} activeOpacity={0.85}>
-            <Ionicons name="eye" size={20} color={colors.textInverse} />
-            <Text style={styles.btnText}>View Preview</Text>
+          <TouchableOpacity style={[styles.btn, isCompact && styles.btnCompact]} onPress={onViewPreview} activeOpacity={0.85}>
+            <Ionicons name="eye" size={isCompact ? 18 : 20} color={colors.textInverse} />
+            <Text style={[styles.btnText, isCompact && styles.btnTextCompact]} numberOfLines={2}>
+              View Preview
+            </Text>
           </TouchableOpacity>
         )}
 
@@ -376,12 +422,14 @@ export default function StudentDetailScreen() {
         )} */}
 
         <TouchableOpacity
-          style={styles.btn}
+          style={[styles.btn, isCompact && styles.btnCompact]}
           onPress={onShareWhatsapp}
           activeOpacity={0.85}
         >
-          <Ionicons name="share-social" size={20} color={colors.textInverse} />
-          <Text style={styles.btnText}>Share on WhatsApp</Text>
+          <Ionicons name="share-social" size={isCompact ? 18 : 20} color={colors.textInverse} />
+          <Text style={[styles.btnText, isCompact && styles.btnTextCompact]} numberOfLines={2}>
+            Share on WhatsApp
+          </Text>
         </TouchableOpacity>
       </View>
 
@@ -395,6 +443,11 @@ export default function StudentDetailScreen() {
       <StudentEditModal
         visible={editVisible}
         student={student}
+        fieldKeys={editFieldKeys}
+        classId={editClassId}
+        classOptions={sortedClasses}
+        onClassChange={onClassChangeForEdit}
+        loadingFields={editFieldsLoading}
         onClose={() => setEditVisible(false)}
         onSubmit={onSaveStudent}
       />
@@ -402,7 +455,10 @@ export default function StudentDetailScreen() {
       <CropFrameSelectModal
         visible={frameSelectVisible}
         subtitle={`Choose a crop frame for ${displayName}'s photo.`}
-        onClose={() => setFrameSelectVisible(false)}
+        onClose={() => {
+          setFrameSelectVisible(false);
+          setPhotoPickSource(null);
+        }}
         onSelect={onFrameSelected}
       />
 
@@ -423,7 +479,8 @@ export default function StudentDetailScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
-  content: { padding: spacing.lg, paddingBottom: spacing.section },
+  content: { padding: spacing.lg, paddingBottom: spacing.section, flexGrow: 1 },
+  contentCompact: { padding: spacing.md },
   centered: {
     flex: 1,
     justifyContent: 'center',
@@ -442,15 +499,6 @@ const styles = StyleSheet.create({
     borderRadius: radius.lg,
     backgroundColor: colors.borderLight,
   },
-  photoPlaceholder: {
-    width: '100%',
-    height: 220,
-    borderRadius: radius.lg,
-    backgroundColor: colors.borderLight,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  photoPlaceholderText: { ...typography.bodySmall, color: colors.textMuted, marginTop: spacing.sm },
   uploadBtn: {
     position: 'absolute',
     bottom: 12,
@@ -462,6 +510,10 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     ...shadow.sm,
+  },
+  uploadBtnLeft: {
+    left: 12,
+    right: undefined,
   },
   uploadPhotoBtn: {
     flexDirection: 'row',
@@ -485,21 +537,36 @@ const styles = StyleSheet.create({
   },
   cardHeader: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
+    alignItems: 'flex-start',
+    gap: spacing.sm,
     marginBottom: spacing.lg,
     paddingBottom: spacing.md,
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
   },
-  name: { ...typography.titleSmall, color: colors.text },
+  name: {
+    ...typography.titleSmall,
+    color: colors.text,
+    flex: 1,
+    flexShrink: 1,
+    minWidth: 0,
+  },
+  nameCompact: { fontSize: 18 },
+  badgeWrap: { flexShrink: 0, maxWidth: '45%' },
   metaRow: {
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     gap: spacing.sm,
     marginBottom: spacing.sm,
   },
-  meta: { ...typography.bodySmall, color: colors.textSecondary, flex: 1 },
+  meta: {
+    ...typography.bodySmall,
+    color: colors.textSecondary,
+    flex: 1,
+    flexShrink: 1,
+    minWidth: 0,
+  },
+  textCompact: { fontSize: 13, lineHeight: 18 },
   metaEmpty: { ...typography.bodySmall, color: colors.textMuted },
   label: { ...typography.label, color: colors.textMuted, marginBottom: spacing.sm },
   reason: { ...typography.bodySmall, color: colors.textSecondary },
@@ -511,10 +578,42 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
     backgroundColor: colors.primary,
     borderRadius: radius.md,
-    padding: spacing.lg,
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.lg,
+    minHeight: 48,
+  },
+  btnCompact: {
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.md,
+    minHeight: 44,
   },
   btnSecondary: { backgroundColor: colors.borderLight },
   btnDisabled: { opacity: 0.7 },
-  btnText: { color: colors.textInverse, ...typography.bodyMedium },
+  btnText: {
+    color: colors.textInverse,
+    ...typography.bodyMedium,
+    flexShrink: 1,
+    textAlign: 'center',
+    lineHeight: 22,
+  },
+  btnTextCompact: { fontSize: 14, lineHeight: 20 },
   btnTextSecondary: { color: colors.textSecondary, ...typography.bodyMedium },
+  headerEditButton: {
+    marginRight: spacing.sm,
+    minWidth: 52,
+    minHeight: 32,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    borderRadius: radius.full,
+    backgroundColor: colors.primary,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  headerEditButtonText: {
+    color: colors.textInverse,
+    ...typography.bodySmall,
+    fontWeight: '600',
+    lineHeight: 18,
+    textAlign: 'center',
+  },
 });

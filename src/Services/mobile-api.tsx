@@ -1,4 +1,5 @@
 // import AsyncStorage from '@react-native-async-storage/async-storage';
+import { Platform } from 'react-native';
 import { mobile_siteConfig } from './mobile-siteConfig';
 import { getDataFromAsyncStorage } from './CommonFunction';
 import axios from 'axios';
@@ -254,6 +255,14 @@ export async function getSchoolStudents() {
   return data;
 }
 
+/** Pending template students – GET api/school/students?templatePendingOnly=true with Bearer token. */
+export async function getSchoolPendingTemplateStudents() {
+  const path = `${mobile_siteConfig.SCHOOL_ENDPOINTS.STUDENTS}?templatePendingOnly=true`;
+  const response = await getDataWithToken(null, path);
+  const data = response?.data ?? response;
+  return data;
+}
+
 /** School-wide student search – GET api/school/students/global-search?search= with Bearer token. */
 export async function getSchoolStudentsGlobalSearch(search: string) {
   const q = encodeURIComponent(search.trim());
@@ -271,11 +280,27 @@ export async function getSchoolStudentDetail(studentId: string) {
   return data;
 }
 
+function normalizeUploadUri(uri: string): string {
+  if (uri.startsWith('content://') || uri.startsWith('file://') || /^https?:\/\//i.test(uri)) {
+    return uri;
+  }
+  if (Platform.OS === 'android' && uri.startsWith('/')) {
+    return `file://${uri}`;
+  }
+  return uri;
+}
+
 function appendImageFile(formData: FormData, fieldName: string, uri: string) {
-  const filename = uri.split('/').pop() || 'photo.jpg';
-  const mime = filename.toLowerCase().endsWith('.png') ? 'image/png' : 'image/jpeg';
+  const uploadUri = normalizeUploadUri(uri);
+  const filename = uploadUri.split('/').pop() || 'photo.jpg';
+  const lower = filename.toLowerCase();
+  const mime = lower.endsWith('.png')
+    ? 'image/png'
+    : lower.endsWith('.webp')
+      ? 'image/webp'
+      : 'image/jpeg';
   formData.append(fieldName, {
-    uri,
+    uri: uploadUri,
     type: mime,
     name: filename,
   } as unknown as Blob);
@@ -302,8 +327,31 @@ export async function postFormDataWithToken(formData: FormData, urlPath: string)
     const text = await response.text();
     let errMessage = text || `Request failed (${response.status})`;
     try {
-      const json = JSON.parse(text);
-      if (json.message) errMessage = json.message;
+      const json = JSON.parse(text) as {
+        message?: string;
+        errors?: unknown;
+        error?: string;
+      };
+      if (typeof json.message === 'string' && json.message.trim()) {
+        errMessage = json.message.trim();
+      } else if (typeof json.error === 'string' && json.error.trim()) {
+        errMessage = json.error.trim();
+      }
+      if (Array.isArray(json.errors)) {
+        const details = json.errors
+          .map((item) => (typeof item === 'string' ? item : JSON.stringify(item)))
+          .filter(Boolean)
+          .join(', ');
+        if (details) errMessage = `${errMessage}: ${details}`;
+      } else if (json.errors && typeof json.errors === 'object') {
+        const details = Object.entries(json.errors as Record<string, unknown>)
+          .map(([key, value]) => {
+            if (Array.isArray(value)) return `${key}: ${value.join(', ')}`;
+            return `${key}: ${String(value)}`;
+          })
+          .join('; ');
+        if (details) errMessage = `${errMessage}: ${details}`;
+      }
     } catch (_) {}
     const err = new Error(errMessage) as Error & { response?: { data?: { message?: string } } };
     err.response = { data: { message: errMessage } };
@@ -338,24 +386,33 @@ export async function createSchoolStudent(body: {
 }) {
   const formData = new FormData();
   formData.append('classId', body.classId);
-  formData.append('studentName', body.studentName);
-  formData.append('admissionNo', body.admissionNo);
-  formData.append('rollNo', body.rollNo);
-  formData.append('fatherName', body.fatherName);
-  formData.append('motherName', body.motherName);
-  formData.append('dob', body.dob);
-  formData.append('mobile', body.mobile);
-  formData.append('gender', body.gender);
-  formData.append('bloodGroup', body.bloodGroup);
-  formData.append('house', body.house);
-  formData.append('photoNo', body.photoNo);
-  formData.append('address', body.address);
+  formData.append('studentName', body.studentName.trim());
 
-  for (const [key, value] of Object.entries(body.extraFields ?? {})) {
-    if (value.trim()) formData.append(key, value.trim());
+  const optionalFields: [string, string][] = [
+    ['admissionNo', body.admissionNo],
+    ['rollNo', body.rollNo],
+    ['fatherName', body.fatherName],
+    ['motherName', body.motherName],
+    ['dob', body.dob],
+    ['mobile', body.mobile],
+    ['gender', body.gender],
+    ['bloodGroup', body.bloodGroup],
+    ['house', body.house],
+    ['photoNo', body.photoNo],
+    ['address', body.address],
+  ];
+  for (const [key, value] of optionalFields) {
+    const trimmed = value?.trim();
+    if (trimmed) formData.append(key, trimmed);
   }
 
-  if (body.photoUri) appendImageFile(formData, 'photo', body.photoUri);
+  // Custom template fields as flat keys — JSON extraFields fails create validation.
+  for (const [key, value] of Object.entries(body.extraFields ?? {})) {
+    const trimmed = value.trim();
+    if (trimmed) formData.append(key, trimmed);
+  }
+
+  // Photo is uploaded separately via api/school/photos/upload after student is created.
   if (body.housePhotoUri) appendImageFile(formData, 'housePhoto', body.housePhotoUri);
 
   return postFormDataWithToken(formData, mobile_siteConfig.SCHOOL_ENDPOINTS.STUDENTS);
@@ -465,12 +522,16 @@ export async function uploadPhoto(
   );
   const url = `${mobile_siteConfig.BASE_URL}${mobile_siteConfig.PHOTOGRAPHER_ENDPOINTS.PHOTOS_UPLOAD}`;
   const formData = new FormData();
-  const rawName = photoUri.split('/').pop() || '';
-  const isPng = rawName.toLowerCase().endsWith('.png') || photoUri.toLowerCase().includes('.png');
-  const filename = isPng ? (rawName.toLowerCase().endsWith('.png') ? rawName : 'photo.png') : (rawName || 'photo.jpg');
-  const mime = isPng ? 'image/png' : 'image/jpeg';
+  const uploadUri = normalizeUploadUri(photoUri);
+  const filename = uploadUri.split('/').pop() || 'photo.jpg';
+  const lower = filename.toLowerCase();
+  const mime = lower.endsWith('.png')
+    ? 'image/png'
+    : lower.endsWith('.webp')
+      ? 'image/webp'
+      : 'image/jpeg';
   formData.append('photo', {
-    uri: photoUri,
+    uri: uploadUri,
     type: mime,
     name: filename,
   } as unknown as Blob);

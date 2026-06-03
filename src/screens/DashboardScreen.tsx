@@ -1,4 +1,4 @@
-import React, { useCallback } from 'react';
+import React, { useCallback, useLayoutEffect, useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -6,35 +6,74 @@ import {
   RefreshControl,
   StyleSheet,
   TouchableOpacity,
-  useWindowDimensions,
+  Alert,
 } from 'react-native';
 import Ionicons from 'react-native-vector-icons/Ionicons';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
+import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useStudents } from '../context/StudentContext';
 import { useSchoolProfile } from '../hooks/useSchoolProfile';
 import Loader from '../components/Loader';
+import StudentAddModal from '../components/StudentAddModal';
+import { createStudent, fetchStudentsByClass, resolveAddStudentFieldKeys } from '../Services/api';
+import type { MainStackParamList } from '../navigation/types';
+import type { StudentCreatePayload } from '../types';
 import { colors, spacing, radius, typography, shadow } from '../theme/colors';
+import { sortClassItems } from '../utils/classSort';
 
-const workflowStats = [
-  { key: 'photoUploaded', label: 'Photo Uploaded', icon: 'camera' as const, color: colors.info },
-  { key: 'previewPending', label: 'Preview Pending', icon: 'eye' as const, color: colors.warning },
-  { key: 'correctionPending', label: 'Correction Pending', icon: 'construct' as const, color: colors.error },
-  { key: 'approved', label: 'Approved', icon: 'checkmark-circle' as const, color: colors.success },
-] as const;
+type ActionCardProps = {
+  label: string;
+  icon: string;
+  iconColor: string;
+  textColor: string;
+  backgroundColor: string;
+  borderColor: string;
+  onPress: () => void;
+};
+
+function ActionCard({
+  label,
+  icon,
+  iconColor,
+  textColor,
+  backgroundColor,
+  borderColor,
+  onPress,
+}: ActionCardProps) {
+  return (
+    <TouchableOpacity
+      style={[
+        styles.actionCard,
+        {
+          backgroundColor,
+          borderColor,
+        },
+      ]}
+      onPress={onPress}
+      activeOpacity={0.88}
+    >
+      <View style={styles.actionCardContent}>
+        <Ionicons name={icon} size={24} color={iconColor} />
+        <Text style={[styles.actionCardText, { color: textColor }]}>{label}</Text>
+      </View>
+    </TouchableOpacity>
+  );
+}
 
 export default function DashboardScreen() {
-  const { width } = useWindowDimensions();
-  const gridGap = spacing.md;
-  const contentWidth = width - spacing.lg * 2;
-  const cellWidth = Math.floor((contentWidth - gridGap) / 2);
-  const navigation = useNavigation<any>();
+  const navigation = useNavigation<NativeStackNavigationProp<MainStackParamList>>();
   const {
-    dashboardStats,
+    classes,
     loading,
     refreshDashboard,
     refreshClasses,
   } = useStudents();
   const { schoolName } = useSchoolProfile();
+  const [selectedClassId, setSelectedClassId] = useState('');
+  const [addVisible, setAddVisible] = useState(false);
+  const [addFieldKeys, setAddFieldKeys] = useState<string[]>([]);
+  const [addFieldsLoading, setAddFieldsLoading] = useState(false);
+  const sortedClasses = useMemo(() => sortClassItems(classes), [classes]);
 
   useFocusEffect(
     useCallback(() => {
@@ -43,25 +82,76 @@ export default function DashboardScreen() {
   );
 
   const onClassList = () => navigation.navigate('ClassList');
+  const onPendingStudents = useCallback(
+    () =>
+      navigation.navigate('StudentList', {
+        listMode: 'pending',
+        title: 'Pending Students',
+      }),
+    [navigation],
+  );
+  const onGoSearch = useCallback(
+    () => navigation.navigate('ClassList', { autoFocusSearch: true }),
+    [navigation],
+  );
   const onRefresh = useCallback(() => {
     refreshDashboard();
     refreshClasses();
   }, [refreshDashboard, refreshClasses]);
 
-  if (loading && !dashboardStats) {
+  const onOpenAddStudent = useCallback(async () => {
+    if (addFieldsLoading) return;
+    if (sortedClasses.length === 0) {
+      await refreshClasses();
+    }
+    setSelectedClassId('');
+    setAddFieldKeys([]);
+    setAddVisible(true);
+  }, [addFieldsLoading, sortedClasses.length, refreshClasses]);
+
+  const onClassChangeForAdd = useCallback(async (classId: string) => {
+    if (addFieldsLoading || !classId) return;
+    setSelectedClassId(classId);
+    setAddFieldsLoading(true);
+    try {
+      const classStudents = await fetchStudentsByClass(classId);
+      const keys = await resolveAddStudentFieldKeys(classStudents);
+      setAddFieldKeys(keys);
+    } catch (e) {
+      Alert.alert('Error', (e as Error).message || 'Could not load form fields');
+    } finally {
+      setAddFieldsLoading(false);
+    }
+  }, [addFieldsLoading]);
+
+  const onAddStudent = useCallback(
+    async (payload: StudentCreatePayload) => {
+      await createStudent(payload);
+      await Promise.all([refreshDashboard(), refreshClasses()]);
+      Alert.alert('Success', 'Student added successfully.');
+    },
+    [refreshDashboard, refreshClasses],
+  );
+
+  useLayoutEffect(() => {
+    navigation.setOptions({
+      headerRight: () => (
+        <View style={styles.headerActions}>
+          <TouchableOpacity
+            onPress={onGoSearch}
+            activeOpacity={0.7}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          >
+            <Ionicons name="search" size={24} color={colors.primary} />
+          </TouchableOpacity>
+        </View>
+      ),
+    });
+  }, [navigation, onGoSearch]);
+
+  if (loading) {
     return <Loader message="Loading dashboard..." />;
   }
-
-  const stats = dashboardStats ?? {
-    totalStudents: 0,
-    photoUploaded: 0,
-    previewPending: 0,
-    correctionPending: 0,
-    approved: 0,
-    printed: 0,
-    delivered: 0,
-    receivedBySchool: 0,
-  };
 
   return (
     <ScrollView
@@ -83,46 +173,74 @@ export default function DashboardScreen() {
         </View>
       </View>
 
-      <View style={styles.statsSection}>
-        <View style={[styles.grid, { gap: gridGap }]}>
-          {workflowStats.map(({ key, label, icon, color }) => (
-            <View key={key} style={[styles.gridCard, { width: cellWidth }]}>
-              <View style={[styles.iconWrap, { backgroundColor: `${color}18` }]}>
-                <Ionicons name={icon} size={22} color={color} />
-              </View>
-              <Text style={styles.cardValue}>{stats[key] ?? 0}</Text>
-              <Text style={styles.cardLabel}>{label}</Text>
-            </View>
-          ))}
-        </View>
+      <View style={styles.actionGroup}>
+        <ActionCard
+          label="Create New Student"
+          icon="person-add-outline"
+          iconColor={colors.primary}
+          textColor={colors.primary}
+          backgroundColor={colors.primaryLight}
+          borderColor={colors.primaryMuted}
+          onPress={onOpenAddStudent}
+        />
+        <ActionCard
+          label="Pending Students"
+          icon="time-outline"
+          iconColor={colors.warning}
+          textColor={colors.warning}
+          backgroundColor="#fff5e6"
+          borderColor="#f6c17f"
+          onPress={onPendingStudents}
+        />
+        <ActionCard
+          label="View Class List"
+          icon="list-outline"
+          iconColor={colors.textInverse}
+          textColor={colors.textInverse}
+          backgroundColor={colors.primary}
+          borderColor={colors.primary}
+          onPress={onClassList}
+        />
       </View>
-      <TouchableOpacity style={styles.cta} onPress={onClassList} activeOpacity={0.85}>
-        <Ionicons name="list" size={22} color={colors.textInverse} />
-        <Text style={styles.ctaText}>View Class List</Text>
-      </TouchableOpacity>
+      <StudentAddModal
+        visible={addVisible}
+        fieldKeys={addFieldKeys}
+        classId={selectedClassId}
+        classOptions={sortedClasses}
+        onClassChange={onClassChangeForAdd}
+        loadingFields={addFieldsLoading}
+        onClose={() => setAddVisible(false)}
+        onSubmit={onAddStudent}
+      />
+      
     </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
-  content: { padding: spacing.lg, paddingBottom: spacing.section },
+  content: {
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.md,
+    paddingBottom: spacing.section,
+    flexGrow: 1,
+  },
   heroCard: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: colors.surface,
-    borderRadius: radius.lg,
+    borderRadius: radius.xl,
     padding: spacing.lg,
-    marginBottom: spacing.lg,
+    marginBottom: spacing.xl,
     borderWidth: 1,
-    borderColor: colors.borderLight,
+    borderColor: colors.border,
     borderLeftWidth: 4,
     borderLeftColor: colors.primary,
-    ...shadow.sm,
+    ...shadow.md,
   },
   heroIcon: {
-    width: 56,
-    height: 56,
+    width: 58,
+    height: 58,
     borderRadius: radius.md,
     backgroundColor: colors.primaryLight,
     justifyContent: 'center',
@@ -133,58 +251,40 @@ const styles = StyleSheet.create({
   heroSchoolName: {
     ...typography.titleSmall,
     color: colors.text,
-    lineHeight: 26,
+    lineHeight: 28,
   },
   heroSub: {
     ...typography.bodySmall,
     color: colors.textMuted,
     marginTop: spacing.xs,
   },
-  statsSection: {
-    gap: spacing.md,
+  actionGroup: {
+    flex: 1,
+    gap: spacing.xl,
   },
-  grid: {
+  actionCard: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
-  },
-  gridCard: {
-    backgroundColor: colors.surface,
-    borderRadius: radius.lg,
-    padding: spacing.lg,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: radius.xl,
+    minHeight: 94,
+    paddingVertical: spacing.lg,
+    paddingHorizontal: spacing.md,
     borderWidth: 1,
-    borderColor: colors.borderLight,
-    ...shadow.sm,
+    ...shadow.md,
   },
-  iconWrap: {
-    width: 40,
-    height: 40,
-    borderRadius: radius.sm,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: spacing.md,
-  },
-  cardValue: {
-    fontSize: 26,
-    fontWeight: '800',
-    color: colors.text,
-  },
-  cardLabel: {
-    ...typography.caption,
-    color: colors.textMuted,
-    marginTop: spacing.xs,
-  },
-  cta: {
-    marginTop: spacing.xxl,
+  actionCardContent: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
     gap: spacing.sm,
-    backgroundColor: colors.primary,
-    borderRadius: radius.md,
-    padding: spacing.lg,
   },
-  ctaText: {
-    color: colors.textInverse,
-    ...typography.bodyMedium,
+  actionCardText: {
+    ...typography.titleSmall,
+    letterSpacing: 0.2,
+  },
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
   },
 });

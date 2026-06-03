@@ -30,6 +30,7 @@ export interface StudentCreatePayload extends StudentUpdatePayload {
 
 /** Body for PUT api/school/students/:studentId */
 export interface StudentUpdatePayload {
+  classId?: string;
   studentName: string;
   admissionNo: string;
   rollNo: string;

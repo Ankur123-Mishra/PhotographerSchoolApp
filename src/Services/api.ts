@@ -4,6 +4,7 @@ import {
   getSchoolClasses,
   getSchoolDashboard,
   getSchoolStudents,
+  getSchoolPendingTemplateStudents,
   getSchoolStudentsGlobalSearch,
   getSchoolStudentDetail,
   getSchoolPreview,
@@ -15,6 +16,7 @@ import {
   rejectSchoolCorrection,
   updateSchoolStudent,
   createSchoolStudent,
+  uploadPhoto,
 } from './mobile-api';
 import { mobile_siteConfig } from './mobile-siteConfig';
 
@@ -266,7 +268,7 @@ function mapApiStudentListItem(s: ApiGlobalSearchStudent): Student {
     schoolId: schoolIdObj ? schoolIdObj._id : (s.schoolId as string),
     schoolName: schoolIdObj ? schoolIdObj.schoolName : '',
     status: mapApiStatus(s.status ?? 'pending'),
-    photoUri: getFullPhotoUrl(s.photoUrl),
+    photoUri: getFullPhotoUrl(resolveStudentPhotoUrl(s as Record<string, unknown>)),
   };
 }
 
@@ -313,6 +315,34 @@ export async function fetchStudentsByClass(classId: string): Promise<Student[]> 
   } catch {
     ensureMockData();
     return getMockStudents().filter((s) => s.classId === classId);
+  }
+}
+
+export async function fetchPendingTemplateStudents(): Promise<Student[]> {
+  try {
+    const res = (await getSchoolPendingTemplateStudents()) as { students?: ApiStudent[] };
+    const list = res?.students ?? [];
+    return list.map((s) => ({
+      id: s._id,
+      admissionNo: s.admissionNo,
+      mobile: s.mobile,
+      address: s.address,
+      name: s.studentName,
+      rollNo: s.rollNo ?? '',
+      className:
+        s.classId && typeof s.classId === 'object'
+          ? `${s.classId.className}${s.classId.section ? ' - ' + s.classId.section : ''}`
+          : '',
+      classId: s.classId && typeof s.classId === 'object' ? s.classId._id : (s.classId as unknown as string),
+      sectionName: s.classId && typeof s.classId === 'object' ? s.classId.section : undefined,
+      sectionId: s.classId && typeof s.classId === 'object' ? s.classId._id : undefined,
+      schoolId: s.schoolId,
+      schoolName: '',
+      status: mapApiStatus(s.status ?? 'pending'),
+    }));
+  } catch {
+    ensureMockData();
+    return getMockStudents().filter((s) => s.status === 'pending');
   }
 }
 
@@ -478,9 +508,53 @@ type ApiPreviewTemplate = {
 
 function getFullPhotoUrl(photoUrl: string | undefined): string | undefined {
   if (!photoUrl || !photoUrl.trim()) return undefined;
+  const trimmed = photoUrl.trim();
+  if (/^https?:\/\//i.test(trimmed)) return trimmed;
   const base = mobile_siteConfig.BASE_URL.replace(/\/$/, '');
-  const path = photoUrl.startsWith('/') ? photoUrl : `/${photoUrl}`;
+  const path = trimmed.startsWith('/') ? trimmed : `/${trimmed}`;
   return `${base}${path}`;
+}
+
+function resolveStudentPhotoUrl(student: Record<string, unknown>): string | undefined {
+  const directKeys = ['photoUrl', 'photo_url', 'profilePhoto', 'profilePhotoUrl', 'imageUrl', 'image_url'];
+  for (const key of directKeys) {
+    const value = student[key];
+    if (typeof value === 'string' && value.trim()) return value.trim();
+  }
+
+  const card = student.card;
+  if (card && typeof card === 'object' && !Array.isArray(card)) {
+    for (const key of ['photoUrl', 'photo_url', 'photo']) {
+      const value = (card as Record<string, unknown>)[key];
+      if (typeof value === 'string' && value.trim() && !value.startsWith('data:')) {
+        return value.trim();
+      }
+    }
+  }
+
+  return undefined;
+}
+
+function extractCreatedStudentId(res: unknown): string | null {
+  if (!res || typeof res !== 'object') return null;
+  const record = res as Record<string, unknown>;
+
+  if (typeof record._id === 'string' && record._id) return record._id;
+  if (typeof record.id === 'string' && record.id) return record.id;
+
+  const student = record.student;
+  if (student && typeof student === 'object') {
+    const studentRecord = student as Record<string, unknown>;
+    if (typeof studentRecord._id === 'string' && studentRecord._id) return studentRecord._id;
+    if (typeof studentRecord.id === 'string' && studentRecord.id) return studentRecord.id;
+  }
+
+  const data = record.data;
+  if (data && typeof data === 'object') {
+    return extractCreatedStudentId(data);
+  }
+
+  return null;
 }
 
 export async function fetchStudentDetail(id: string): Promise<Student | null> {
@@ -515,7 +589,7 @@ export async function fetchStudentDetail(id: string): Promise<Student | null> {
       schoolName: schoolIdObj ? schoolIdObj.schoolName : '',
       status: mapApiStatus(s.status ?? 'pending'),
       correctionReason: s.correctionReason,
-      photoUri: getFullPhotoUrl(s.photoUrl),
+      photoUri: getFullPhotoUrl(resolveStudentPhotoUrl(s as Record<string, unknown>)),
     };
   } catch {
     ensureMockData();
@@ -589,14 +663,53 @@ export async function resolveAddStudentFieldKeys(
   return getAddStudentFieldKeys(undefined);
 }
 
-/** Create student – POST api/school/students */
+/** Create student – POST api/school/students, persist extraFields via PUT, then upload photo. */
 export async function createStudent(payload: StudentCreatePayload): Promise<void> {
+  const { photoUri, extraFields, ...createBody } = payload;
   try {
-    const res = await createSchoolStudent(payload);
+    const res = await createSchoolStudent(createBody);
     const data = res && typeof res === 'object' && 'data' in res ? (res as { data: unknown }).data : res;
     console.log('[createStudent] API response:', JSON.stringify(data ?? res, null, 2));
+
+    const studentId = extractCreatedStudentId(data ?? res);
+
+    const trimmedExtra: Record<string, string> = {};
+    for (const [key, value] of Object.entries(extraFields ?? {})) {
+      const trimmed = value.trim();
+      if (trimmed) trimmedExtra[key] = trimmed;
+    }
+    if (studentId && Object.keys(trimmedExtra).length > 0) {
+      try {
+        await updateSchoolStudent(studentId, { extraFields: trimmedExtra });
+      } catch (extraErr) {
+        console.log('[createStudent] extraFields update error:', extraErr);
+      }
+    }
+
+    if (photoUri) {
+      if (!studentId) {
+        throw new Error(
+          'Student was created but the photo could not be uploaded. Open the student and upload the photo again.',
+        );
+      }
+      try {
+        await uploadPhoto(photoUri, studentId);
+      } catch (uploadErr) {
+        const uploadMsg =
+          uploadErr instanceof Error ? uploadErr.message : 'Photo upload failed';
+        throw new Error(
+          `Student was created but the photo could not be uploaded: ${uploadMsg}. Open the student and try uploading again.`,
+        );
+      }
+    }
   } catch (e) {
     console.log('[createStudent] API error:', e);
+    if (e instanceof Error && e.message.includes('photo could not be uploaded')) {
+      throw e;
+    }
+    if (e instanceof Error && e.message && e.message !== 'Failed to add student') {
+      throw e;
+    }
     const axiosErr = e as { response?: { data?: { message?: string } } };
     const msg = axiosErr.response?.data?.message;
     throw new Error(typeof msg === 'string' ? msg : 'Failed to add student');

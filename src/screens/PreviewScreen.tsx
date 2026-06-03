@@ -493,14 +493,6 @@ export default function PreviewScreen() {
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
-      <View style={styles.headerCard}>
-        <Ionicons name="id-card" size={28} color={colors.primary} />
-        <View>
-          <Text style={styles.title}>ID Card Preview</Text>
-          <Text style={styles.subtitle}>{student!.studentName} • Class {getClassName(student!)}</Text>
-        </View>
-      </View>
-      
       {/* {cardLayout.sizeLabel ? (
         <View style={styles.sizeBadge}>
           <Ionicons name="resize-outline" size={18} color={colors.primary} />
@@ -598,18 +590,6 @@ const styles = StyleSheet.create({
   content: { padding: spacing.lg, paddingBottom: spacing.section },
   centered: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: colors.background },
   emptyText: { ...typography.body, color: colors.textMuted, marginTop: spacing.sm, textAlign: 'center' },
-  headerCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.md,
-    backgroundColor: colors.surface,
-    borderRadius: radius.lg,
-    padding: spacing.lg,
-    marginBottom: spacing.lg,
-    ...shadow.sm,
-  },
-  title: { ...typography.heading, color: colors.text },
-  subtitle: { ...typography.bodySmall, color: colors.textMuted, marginTop: spacing.xs },
   sizeBadge: {
     flexDirection: 'row',
     alignItems: 'center',
