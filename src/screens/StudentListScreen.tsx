@@ -116,23 +116,22 @@ export default function StudentListScreen() {
     [classId, loadStudentsByClass, refreshDashboard],
   );
 
-  const pendingCount = students.length;
+  const totalCount = students.length;
 
   useLayoutEffect(() => {
-    if (!isPendingMode) {
-      navigation.setOptions({ headerRight: undefined });
-      return;
-    }
-
     navigation.setOptions({
       headerRight: () => (
-        <View style={styles.headerCountBadge}>
-          <Text style={styles.headerCountNumber}>{pendingCount}</Text>
-          <Text style={styles.headerCountLabel}>Pending</Text>
+        <View style={isPendingMode ? styles.headerCountBadge : styles.headerTotalBadge}>
+          <Text style={isPendingMode ? styles.headerCountNumber : styles.headerTotalNumber}>
+            {totalCount}
+          </Text>
+          <Text style={isPendingMode ? styles.headerCountLabel : styles.headerTotalLabel}>
+            {isPendingMode ? 'Pending' : 'Students'}
+          </Text>
         </View>
       ),
     });
-  }, [navigation, isPendingMode, pendingCount]);
+  }, [navigation, isPendingMode, totalCount]);
 
   if (loading && students.length === 0) {
     return <Loader message="Loading students..." />;
@@ -141,7 +140,7 @@ export default function StudentListScreen() {
   return (
     <View style={styles.container}>
       <View style={styles.toolbar}>
-        <SearchBar onSearch={setSearchQuery} placeholder="Search by name, mobile or photo no." />
+        <SearchBar onSearch={setSearchQuery} placeholder="Search by name, mobile number" />
         <TouchableOpacity
           style={[styles.filterBtn, filterStatus !== 'all' && styles.filterBtnActive]}
           onPress={() => {
@@ -248,5 +247,25 @@ const styles = StyleSheet.create({
     ...typography.caption,
     fontWeight: '600',
     color: colors.warning,
+  },
+  headerTotalBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    backgroundColor: colors.primaryLight,
+    borderRadius: radius.md,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs,
+    marginRight: spacing.sm,
+  },
+  headerTotalNumber: {
+    ...typography.bodySmall,
+    fontWeight: '700',
+    color: colors.primary,
+  },
+  headerTotalLabel: {
+    ...typography.caption,
+    fontWeight: '600',
+    color: colors.primary,
   },
 });

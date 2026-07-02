@@ -18,6 +18,42 @@ function normalizeKey(key: string): string {
   return key.toLowerCase().replace(/[^a-z0-9]/g, '');
 }
 
+const SKIP_CAPITALIZE_FIELD_KEYS = new Set([
+  'mobile',
+  'mobileno',
+  'phone',
+  'contact',
+  'admissionno',
+  'admission',
+  'rollno',
+  'roll',
+  'dob',
+  'dateofbirth',
+  'birthdate',
+  'photono',
+  'photo',
+  'photourl',
+  'colorcode',
+  'colorcodephoto',
+]);
+
+function shouldCapitalizeFormField(key: string): boolean {
+  return !SKIP_CAPITALIZE_FIELD_KEYS.has(normalizeKey(key));
+}
+
+/** Title-case each word when the value uses only lowercase letters (e.g. "john doe" → "John Doe"). */
+export function capitalizeWordsIfAllLowercase(value: string): string {
+  const trimmed = value.trim();
+  if (!trimmed) return value;
+
+  const letters = trimmed.replace(/[^a-zA-Z]/g, '');
+  if (!letters || letters !== letters.toLowerCase()) {
+    return value;
+  }
+
+  return trimmed.replace(/\S+/g, (word) => word.charAt(0).toUpperCase() + word.slice(1));
+}
+
 /** Non-empty entries from card — same filter as StudentDetailScreen meta rows */
 export function getCardFieldEntries(
   card: StudentCardFields | undefined,
@@ -283,7 +319,10 @@ export function cardFormToUpdatePayload(
   };
 
   for (const [key, raw] of Object.entries(cardForm)) {
-    const value = raw.trim();
+    let value = raw.trim();
+    if (value && shouldCapitalizeFormField(key)) {
+      value = capitalizeWordsIfAllLowercase(value);
+    }
     const norm = normalizeKey(key);
     const mapped = CARD_KEY_TO_PAYLOAD[norm];
 

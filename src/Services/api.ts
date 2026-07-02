@@ -66,6 +66,7 @@ export async function apiPost<T>(url: string, body?: object): Promise<T> {
 
 import type {
   CorrectionChange,
+  CorrectionClassGroup,
   CorrectionItem,
   DashboardStats,
   ClassItem,
@@ -999,12 +1000,43 @@ function unwrapCorrectionsPayload(res: unknown): ApiCorrection[] {
 }
 
 function mapApiCorrectionToItem(c: ApiCorrection): CorrectionItem {
+  const rec = c as Record<string, unknown>;
   const sid = c.studentId && typeof c.studentId === 'object' ? c.studentId : null;
+  const studentData =
+    rec.studentData && typeof rec.studentData === 'object' && !Array.isArray(rec.studentData)
+      ? (rec.studentData as Record<string, unknown>)
+      : null;
   const studentId = sid?._id ?? (typeof c.studentId === 'string' ? c.studentId : '');
-  const admissionNo = sid?.admissionNo ?? sid?.admission_no;
-  const rollNo = sid?.rollNo ?? sid?.roll_no;
+  const admissionNo =
+    sid?.admissionNo ??
+    sid?.admission_no ??
+    (typeof studentData?.admissionNo === 'string' ? studentData.admissionNo : undefined) ??
+    (typeof studentData?.admission_no === 'string' ? studentData.admission_no : undefined);
+  const rollNo =
+    sid?.rollNo ??
+    sid?.roll_no ??
+    (typeof studentData?.rollNo === 'string' ? studentData.rollNo : undefined) ??
+    (typeof studentData?.roll_no === 'string' ? studentData.roll_no : undefined);
   const studentNm =
-    sid?.studentName ?? sid?.student_name ?? (typeof c.studentName === 'string' ? c.studentName : '');
+    sid?.studentName ??
+    sid?.student_name ??
+    (typeof studentData?.studentName === 'string' ? studentData.studentName : undefined) ??
+    (typeof studentData?.student_name === 'string' ? studentData.student_name : undefined) ??
+    (typeof c.studentName === 'string' ? c.studentName : '');
+
+  let requestedBy = extractRequestedBy(c);
+  if (!requestedBy) {
+    if (typeof rec.requestedByName === 'string' && rec.requestedByName.trim()) {
+      requestedBy = rec.requestedByName.trim();
+    } else if (rec.requestedBy && typeof rec.requestedBy === 'object' && !Array.isArray(rec.requestedBy)) {
+      const rb = rec.requestedBy as Record<string, unknown>;
+      requestedBy =
+        (typeof rb.name === 'string' && rb.name.trim() ? rb.name.trim() : undefined) ??
+        (typeof rb.type === 'string' && rb.type.trim() ? rb.type.trim() : undefined);
+    } else if (typeof rec.requestedByType === 'string' && rec.requestedByType.trim()) {
+      requestedBy = rec.requestedByType.trim();
+    }
+  }
 
   const changes = extractChangesFromCorrection(c);
 
@@ -1025,7 +1057,7 @@ function mapApiCorrectionToItem(c: ApiCorrection): CorrectionItem {
     studentName: studentNm,
     admissionNo,
     rollNo,
-    requestedBy: extractRequestedBy(c),
+    requestedBy,
     changes,
     comment: typeof c.comment === 'string' ? c.comment : undefined,
     status: typeof c.status === 'string' ? c.status : undefined,
@@ -1033,18 +1065,84 @@ function mapApiCorrectionToItem(c: ApiCorrection): CorrectionItem {
   };
 }
 
-/** Pending correction queue — GET api/school/corrections (via mobile-api BASE_URL + Bearer token). */
-export async function fetchCorrectionList(): Promise<CorrectionItem[]> {
+type ApiCorrectionClassGroup = {
+  classId?: string | { _id: string; className?: string; section?: string };
+  className?: string;
+  section?: string;
+  pendingCount?: number;
+  corrections?: ApiCorrection[];
+};
+
+function filterPendingCorrections(items: CorrectionItem[]): CorrectionItem[] {
+  return items.filter((item) => {
+    const st = item.status?.toLowerCase();
+    return !st || st === 'pending';
+  });
+}
+
+function unwrapCorrectionClassesPayload(res: unknown): ApiCorrectionClassGroup[] {
+  if (res == null || typeof res !== 'object') return [];
+  const r = res as Record<string, unknown>;
+
+  if (Array.isArray(r.classes)) return r.classes as ApiCorrectionClassGroup[];
+
+  const inner = r.data;
+  if (inner && typeof inner === 'object' && !Array.isArray(inner)) {
+    const d = inner as Record<string, unknown>;
+    if (Array.isArray(d.classes)) return d.classes as ApiCorrectionClassGroup[];
+  }
+
+  const flat = unwrapCorrectionsPayload(res);
+  if (flat.length === 0) return [];
+
+  return [
+    {
+      classId: '_all',
+      className: 'All Classes',
+      pendingCount: flat.length,
+      corrections: flat,
+    },
+  ];
+}
+
+function mapApiCorrectionClassGroup(group: ApiCorrectionClassGroup): CorrectionClassGroup {
+  const cid = group.classId;
+  const classId =
+    typeof cid === 'object' && cid?._id
+      ? cid._id
+      : typeof cid === 'string'
+        ? cid
+        : '';
+  const className =
+    group.className ??
+    (typeof cid === 'object' && cid?.className ? cid.className : undefined) ??
+    'Unknown Class';
+  const section =
+    group.section ??
+    (typeof cid === 'object' && cid?.section ? cid.section : undefined);
+  const corrections = filterPendingCorrections(
+    (group.corrections ?? []).map(mapApiCorrectionToItem),
+  );
+
+  return {
+    classId,
+    className,
+    section: section || undefined,
+    pendingCount: group.pendingCount ?? corrections.length,
+    corrections,
+  };
+}
+
+/** Pending correction queue grouped by class — GET api/school/corrections. */
+export async function fetchCorrectionList(): Promise<CorrectionClassGroup[]> {
   try {
     const res = await getSchoolCorrections();
-    const list = unwrapCorrectionsPayload(res).map(mapApiCorrectionToItem);
-    return list.filter((item) => {
-      const st = item.status?.toLowerCase();
-      return !st || st === 'pending';
-    });
+    return unwrapCorrectionClassesPayload(res)
+      .map(mapApiCorrectionClassGroup)
+      .filter((group) => group.pendingCount > 0 || group.corrections.length > 0);
   } catch {
     ensureMockData();
-    return getMockStudents()
+    const corrections = getMockStudents()
       .filter((s) => s.status === 'correction_pending')
       .map((s, idx) => ({
         id: `mock_corr_${s.id}_${idx}`,
@@ -1058,6 +1156,17 @@ export async function fetchCorrectionList(): Promise<CorrectionItem[]> {
         status: 'pending',
         createdAt: new Date().toISOString(),
       }));
+
+    if (corrections.length === 0) return [];
+
+    return [
+      {
+        classId: '_all',
+        className: 'All Classes',
+        pendingCount: corrections.length,
+        corrections,
+      },
+    ];
   }
 }
 

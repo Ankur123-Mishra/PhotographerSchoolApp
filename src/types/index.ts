@@ -129,3 +129,12 @@ export interface CorrectionItem {
   status?: string;
   createdAt?: string;
 }
+
+/** Class bucket from GET api/school/corrections — each class has its pending corrections */
+export interface CorrectionClassGroup {
+  classId: string;
+  className: string;
+  section?: string;
+  pendingCount: number;
+  corrections: CorrectionItem[];
+}

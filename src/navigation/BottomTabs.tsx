@@ -35,7 +35,7 @@ const tabBarStyleVisible = {
   backgroundColor: colors.surface,
   paddingBottom: 8,
   paddingTop: 8,
-  height: 80,
+  height: 100,
   borderTopWidth: 1,
   borderTopColor: colors.border,
   shadowColor: '#000',

@@ -436,6 +436,7 @@ export async function requestSchoolCorrection(studentId: string, comment: string
 /** School corrections list – GET api/school/corrections with Bearer token. Returns { corrections: [{ _id, studentId: { _id, admissionNo, rollNo, studentName }, comment, status, ... }] }. */
 export async function getSchoolCorrections() {
   const response = await getDataWithToken(null, mobile_siteConfig.SCHOOL_ENDPOINTS.CORRECTIONS);
+  console.log("Get correcton Responce::",response)
   const data = response?.data ?? response;
   return data;
 }

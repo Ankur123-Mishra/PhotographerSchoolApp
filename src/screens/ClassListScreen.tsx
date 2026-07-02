@@ -100,7 +100,7 @@ export default function ClassListScreen() {
     <View style={styles.searchWrap}>
       <SearchBar
         onSearch={setSearchQuery}
-        placeholder="Search by name, mobile or photo no."
+        placeholder="Search by name, mobile number"
         autoFocus={params?.autoFocusSearch}
       />
     </View>

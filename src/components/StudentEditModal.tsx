@@ -10,6 +10,7 @@ import {
   Alert,
   ScrollView,
   KeyboardAvoidingView,
+  Keyboard,
   Platform,
   useWindowDimensions,
 } from 'react-native';
@@ -60,6 +61,7 @@ export default function StudentEditModal({
   const isCompact = screenWidth < 380;
   const [form, setForm] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(false);
+  const [keyboardVisible, setKeyboardVisible] = useState(false);
   const [classDropdownOpen, setClassDropdownOpen] = useState(false);
   const [selectedClassId, setSelectedClassId] = useState(classId);
 
@@ -70,6 +72,23 @@ export default function StudentEditModal({
     if (!visible) return;
     setClassDropdownOpen(false);
     setSelectedClassId(classId || student?.classId || '');
+  }, [visible]);
+
+  useEffect(() => {
+    if (!visible) {
+      setKeyboardVisible(false);
+      return;
+    }
+
+    const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+    const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+    const showSub = Keyboard.addListener(showEvent, () => setKeyboardVisible(true));
+    const hideSub = Keyboard.addListener(hideEvent, () => setKeyboardVisible(false));
+
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+    };
   }, [visible]);
 
   useEffect(() => {
@@ -222,32 +241,34 @@ export default function StudentEditModal({
               <Text style={styles.empty}>No card details available</Text>
             ) : null}
           </ScrollView>
-          <View style={styles.actions}>
-            <TouchableOpacity
-              style={[styles.btn, styles.cancelBtn, isCompact && styles.btnCompact]}
-              onPress={handleClose}
-              disabled={loading}
-              activeOpacity={0.85}
-            >
-              <Text style={[styles.cancelText, isCompact && styles.btnTextCompact]} numberOfLines={1}>
-                Cancel
-              </Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.btn, styles.submitBtn, isCompact && styles.btnCompact]}
-              onPress={handleSubmit}
-              disabled={loading || !canSave}
-              activeOpacity={0.85}
-            >
-              {loading ? (
-                <ActivityIndicator color={colors.textInverse} size="small" />
-              ) : (
-                <Text style={[styles.submitText, isCompact && styles.btnTextCompact]} numberOfLines={1}>
-                  Save
+          {!keyboardVisible ? (
+            <View style={styles.actions}>
+              <TouchableOpacity
+                style={[styles.btn, styles.cancelBtn, isCompact && styles.btnCompact]}
+                onPress={handleClose}
+                disabled={loading}
+                activeOpacity={0.85}
+              >
+                <Text style={[styles.cancelText, isCompact && styles.btnTextCompact]} numberOfLines={1}>
+                  Cancel
                 </Text>
-              )}
-            </TouchableOpacity>
-          </View>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.btn, styles.submitBtn, isCompact && styles.btnCompact]}
+                onPress={handleSubmit}
+                disabled={loading || !canSave}
+                activeOpacity={0.85}
+              >
+                {loading ? (
+                  <ActivityIndicator color={colors.textInverse} size="small" />
+                ) : (
+                  <Text style={[styles.submitText, isCompact && styles.btnTextCompact]} numberOfLines={1}>
+                    Save
+                  </Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          ) : null}
         </View>
       </KeyboardAvoidingView>
     </Modal>

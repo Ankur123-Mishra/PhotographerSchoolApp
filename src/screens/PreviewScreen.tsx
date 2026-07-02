@@ -152,19 +152,40 @@ function coerceSchoolDimension(
   return null;
 }
 
+/** ~96 dpi — keeps template element positions stable vs shrinking to screen width. */
+const PREVIEW_PX_PER_MM = 3.78;
+
+function dimensionToMm(value: number, unit: string): number {
+  const u = unit.toLowerCase();
+  if (u === 'cm' || u === 'centimeter' || u === 'centimeters') return value * 10;
+  if (u === 'in' || u === 'inch' || u === 'inches') return value * 25.4;
+  return value;
+}
+
+function formatDimensionUnit(unit: string): string {
+  if (unit === 'millimeter' || unit === 'millimeters') return 'mm';
+  if (unit === 'centimeter' || unit === 'centimeters') return 'cm';
+  if (unit === 'inch' || unit === 'inches') return 'in';
+  return unit;
+}
+
 /**
- * Preview fills horizontal space (minus padding); aspect ratio matches school.dimension width/height.
- * ScrollView allows a taller max height so portrait cards (e.g. 56×88 mm) are not forced tiny.
+ * Card size follows school physical dimensions (not squeezed to screen width).
+ * Wider cards scroll horizontally so template elements stay aligned.
  */
 function getPreviewCardLayout(
   student: ApiPreviewStudent | undefined,
   screenWidth: number,
-  screenHeight: number,
   contentPaddingHorizontal: number,
-): { width: number; aspectRatio: number; sizeLabel: string | null; textScale: number } {
+): {
+  width: number;
+  aspectRatio: number;
+  sizeLabel: string | null;
+  fontScale: number;
+  needsHorizontalScroll: boolean;
+} {
   const inset = contentPaddingHorizontal * 2;
   const availW = Math.max(100, screenWidth - inset);
-  const availH = Math.max(180, Math.min(screenHeight * 0.62, screenHeight - 140));
 
   const meta = coerceSchoolDimension(student);
   const fallbackAspect = 1.62;
@@ -175,34 +196,24 @@ function getPreviewCardLayout(
       width: fallbackW,
       aspectRatio: fallbackAspect,
       sizeLabel: null,
-      textScale: Math.max(0.95, fallbackW / 240),
+      fontScale: 1,
+      needsHorizontalScroll: false,
     };
   }
 
   const { width: pw, height: ph, unit } = meta;
   const aspectRatio = pw / ph;
-
-  let width = availW;
-  let height = width / aspectRatio;
-  if (height > availH) {
-    height = availH;
-    width = height * aspectRatio;
-  }
-
-  const displayUnit =
-    unit === 'millimeter' || unit === 'millimeters'
-      ? 'mm'
-      : unit === 'centimeter' || unit === 'centimeters'
-        ? 'cm'
-        : unit === 'inch' || unit === 'inches'
-          ? 'in'
-          : meta.unit;
+  const widthMm = dimensionToMm(pw, unit);
+  const naturalWidth = widthMm * PREVIEW_PX_PER_MM;
+  const displayUnit = formatDimensionUnit(unit);
 
   return {
-    width,
+    width: naturalWidth,
     aspectRatio,
     sizeLabel: `${pw} × ${ph} ${displayUnit}`,
-    textScale: Math.max(0.85, Math.min(1.35, width / 220)),
+    // Template fontSize is authored for naturalWidth; percentage boxes already scale with card.
+    fontScale: 1,
+    needsHorizontalScroll: naturalWidth > availW,
   };
 }
 
@@ -279,7 +290,7 @@ function isAddressField(dataField?: string): boolean {
 }
 
 export default function PreviewScreen() {
-  const { width: windowWidth, height: windowHeight } = useWindowDimensions();
+  const { width: windowWidth } = useWindowDimensions();
   const { params } = useRoute<PreviewRoute>();
   const { studentId } = params;
   const navigation = useNavigation<Nav>();
@@ -348,7 +359,7 @@ export default function PreviewScreen() {
   const studentPhotoUri = getFullPhotoUrl(student?.photoUrl);
   const studentColorCodeUri = getFullPhotoUrl(student?.colorCodePhotoUrl);
   const canApproveReject = student && student.status === 'preview_sent';
-  const cardLayout = getPreviewCardLayout(student, windowWidth, windowHeight, spacing.lg);
+  const cardLayout = getPreviewCardLayout(student, windowWidth, spacing.lg);
   const renderTemplateElements = (elements: ApiTemplateElement[]) =>
     elements.map((element) => {
       const commonStyle = {
@@ -373,7 +384,9 @@ export default function PreviewScreen() {
               <Image source={{ uri: studentPhotoUri }} style={styles.photoElement} resizeMode="cover" />
             ) : (
               <View style={styles.photoPlaceholder}>
-                <Text style={styles.photoPlaceholderText}>{student!.studentName.charAt(0)}</Text>
+                <Text allowFontScaling={false} style={styles.photoPlaceholderText}>
+                  {student!.studentName.charAt(0)}
+                </Text>
               </View>
             )}
           </View>
@@ -407,15 +420,24 @@ export default function PreviewScreen() {
       const rawValue = getStudentFieldValue(student!, element.dataField) || element.content || '';
       const value = rawValue;
       const isAddress = isAddressField(element.dataField);
-      const fontSize = Math.round((element.fontSize ?? 10) * cardLayout.textScale);
-      const lineHeight = Math.round(fontSize * 1.3);
+      const fontSize = Math.max(6, Math.round((element.fontSize ?? 10) * cardLayout.fontScale));
+      const lineHeight = Math.round(fontSize * 1.2);
       const fontWeight = (element.fontWeight as '400' | '500' | '600' | '700') ?? '400';
       const textAlign = mapTemplateTextAlign(element.textAlign);
       const w = element.width;
       const h = element.height;
       const hasWidth = w != null && Number(w) > 0;
       const hasHeight = h != null && Number(h) > 0;
-      const useLayoutBox = hasWidth;
+      // textAlign only works when Text has a bounded width; elements without width
+      // (e.g. className) need a layout box or center/right alignment is ignored.
+      const needsFullWidthForAlign = !hasWidth && (textAlign === 'center' || textAlign === 'right');
+      const boxLeft = needsFullWidthForAlign ? 0 : element.x;
+      const boxTop = element.y;
+      const effectiveWidth = hasWidth
+        ? Number(w)
+        : needsFullWidthForAlign
+          ? 100
+          : Math.min(100, Math.max(20, 100 - element.x));
 
       const textStyle = [
         styles.textElementInner,
@@ -430,51 +452,31 @@ export default function PreviewScreen() {
         isAddress && Platform.OS === 'android' ? styles.textElementAddressAndroid : null,
       ];
 
-      if (useLayoutBox) {
-        return (
-          <View
-            key={element.id}
-            style={[
-              styles.textElementWrap,
-              isAddress && styles.textElementWrapAddress,
-              commonStyle,
-              {
-                width: `${Number(w)}%`,
-                ...(hasHeight && !isAddress ? { height: `${Number(h)}%` } : {}),
-                justifyContent: mapTemplateVerticalAlign(element.textVerticalAlign),
-              },
-            ]}
-          >
-            <Text
-              style={textStyle}
-              numberOfLines={isAddress ? undefined : 2}
-              ellipsizeMode={isAddress ? undefined : 'tail'}
-            >
-              {value}
-            </Text>
-          </View>
-        );
-      }
-
       return (
-        <Text
+        <View
           key={element.id}
           style={[
-            styles.textElement,
-            isAddress && styles.textElementAddress,
-            commonStyle,
+            styles.textElementWrap,
+            isAddress && styles.textElementWrapAddress,
             {
-              fontSize,
-              lineHeight,
-              fontWeight,
-              textAlign,
+              left: `${boxLeft}%`,
+              top: `${boxTop}%`,
+              width: `${effectiveWidth}%`,
+              ...(hasHeight && !isAddress ? { height: `${Number(h)}%` } : {}),
+              justifyContent: mapTemplateVerticalAlign(element.textVerticalAlign),
             },
           ]}
-          numberOfLines={isAddress ? undefined : 2}
-          ellipsizeMode={isAddress ? undefined : 'tail'}
         >
-          {value}
-        </Text>
+          <Text
+            style={textStyle}
+            allowFontScaling={false}
+            maxFontSizeMultiplier={1}
+            numberOfLines={isAddress ? undefined : 2}
+            ellipsizeMode={isAddress ? undefined : 'tail'}
+          >
+            {value}
+          </Text>
+        </View>
       );
     });
 
@@ -500,38 +502,50 @@ export default function PreviewScreen() {
         </View>
       ) : null} */}
 
-      <View style={styles.cardWrap}>
-        {frontTemplateUri ? (
-          <>
-            <ImageBackground
-              source={{ uri: frontTemplateUri }}
-              style={[
-                styles.templateCanvas,
-                { width: cardLayout.width, aspectRatio: cardLayout.aspectRatio },
-              ]}
-              resizeMode="stretch"
-            >
-              {renderTemplateElements(template?.elements ?? [])}
-            </ImageBackground>
-            {backTemplateUri ? (
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator
+        nestedScrollEnabled
+        scrollEnabled={cardLayout.needsHorizontalScroll}
+        contentContainerStyle={[
+          styles.cardScrollContent,
+          !cardLayout.needsHorizontalScroll && styles.cardScrollContentCentered,
+        ]}
+        style={styles.cardScroll}
+      >
+        <View style={styles.cardWrap}>
+          {frontTemplateUri ? (
+            <>
               <ImageBackground
-                source={{ uri: backTemplateUri }}
+                source={{ uri: frontTemplateUri }}
                 style={[
                   styles.templateCanvas,
                   { width: cardLayout.width, aspectRatio: cardLayout.aspectRatio },
                 ]}
                 resizeMode="stretch"
               >
-                {renderTemplateElements(template?.backElements ?? [])}
+                {renderTemplateElements(template?.elements ?? [])}
               </ImageBackground>
-            ) : null}
-          </>
-        ) : (
-          <View style={styles.noTemplateWrap}>
-            <Text style={styles.emptyText}>Template image not found in response.</Text>
-          </View>
-        )}
-      </View>
+              {backTemplateUri ? (
+                <ImageBackground
+                  source={{ uri: backTemplateUri }}
+                  style={[
+                    styles.templateCanvas,
+                    { width: cardLayout.width, aspectRatio: cardLayout.aspectRatio },
+                  ]}
+                  resizeMode="stretch"
+                >
+                  {renderTemplateElements(template?.backElements ?? [])}
+                </ImageBackground>
+              ) : null}
+            </>
+          ) : (
+            <View style={styles.noTemplateWrap}>
+              <Text style={styles.emptyText}>Template image not found in response.</Text>
+            </View>
+          )}
+        </View>
+      </ScrollView>
       {canApproveReject && (
         <View style={styles.actions}>
           <TouchableOpacity
@@ -603,9 +617,17 @@ const styles = StyleSheet.create({
     ...shadow.sm,
   },
   sizeBadgeText: { ...typography.bodySmall, color: colors.text, flex: 1 },
-  cardWrap: {
-    alignItems: 'center',
+  cardScroll: {
     marginBottom: spacing.xxl,
+  },
+  cardScrollContent: {
+    flexGrow: 1,
+  },
+  cardScrollContentCentered: {
+    justifyContent: 'center',
+    alignSelf: 'stretch',
+  },
+  cardWrap: {
     gap: spacing.md,
   },
   templateCanvas: {
@@ -648,11 +670,6 @@ const styles = StyleSheet.create({
   },
   textElementAddressAndroid: {
     includeFontPadding: false,
-  },
-  textElement: {
-    position: 'absolute',
-    color: '#111827',
-    maxWidth: '80%',
   },
   noTemplateWrap: {
     paddingVertical: spacing.xl,
