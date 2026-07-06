@@ -15,24 +15,30 @@ import Ionicons from 'react-native-vector-icons/Ionicons';
 import { launchImageLibrary } from 'react-native-image-picker';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import { useAuth } from '../context/AuthContext';
 import { useStudents } from '../context/StudentContext';
 // import StatusBadge from '../components/StatusBadge';
 import CorrectionModal from '../components/CorrectionModal';
 import PhotoCaptureModal from '../components/PhotoCaptureModal';
 import StudentEditModal from '../components/StudentEditModal';
 import Loader from '../components/Loader';
-import type { MainStackParamList } from '../navigation/types';
+import type { MainStackParamList, PhotographerStackParamList } from '../navigation/types';
 import type { Student, StudentUpdatePayload } from '../types';
 import { colors, spacing, radius, typography, shadow } from '../theme/colors';
-import { PutDataWithToken, uploadPhoto } from '../Services/mobile-api';
+import { PutDataWithToken, uploadPhoto, uploadStudentPhoto } from '../Services/mobile-api';
 import { mobile_siteConfig } from '../Services/mobile-siteConfig';
-import { resolveAddStudentFieldKeys, updateStudent, fetchStudentsByClass } from '../Services/api';
+import {
+  resolveAddStudentFieldKeys,
+  updateStudent,
+  updatePhotographerStudent,
+  fetchStudentsByClass,
+} from '../Services/api';
 import { formatCardLabel, getCardFieldEntries, getStudentDisplayName } from '../utils/cardFields';
 import { sortClassItems } from '../utils/classSort';
 import Images from '../assets/image';
 
-type Nav = NativeStackNavigationProp<MainStackParamList, 'StudentDetail'>;
-type DetailRoute = RouteProp<MainStackParamList, 'StudentDetail'>;
+type Nav = NativeStackNavigationProp<MainStackParamList & PhotographerStackParamList, 'StudentDetail'>;
+type DetailRoute = RouteProp<MainStackParamList & PhotographerStackParamList, 'StudentDetail'>;
 
 function getCardFieldIcon(key: string): string {
   const k = key.toLowerCase();
@@ -52,6 +58,8 @@ export default function StudentDetailScreen() {
   const { params } = useRoute<DetailRoute>();
   const { studentId } = params;
   const navigation = useNavigation<Nav>();
+  const { user } = useAuth();
+  const isSchoolLogin = user?.role !== 'photographer';
   const { getStudentDetail, raiseStudentCorrection, setError, classes, refreshClasses } = useStudents();
   const [student, setStudent] = useState<Student | null>(null);
   const [loading, setLoading] = useState(true);
@@ -84,7 +92,11 @@ export default function StudentDetailScreen() {
   const onSaveStudent = useCallback(
     async (payload: StudentUpdatePayload) => {
       try {
-        await updateStudent(studentId, payload);
+        if (isSchoolLogin) {
+          await updateStudent(studentId, payload);
+        } else {
+          await updatePhotographerStudent(studentId, payload);
+        }
         setError(null);
         await load();
         Alert.alert('Success', 'Student updated successfully.');
@@ -96,7 +108,7 @@ export default function StudentDetailScreen() {
         throw new Error(message);
       }
     },
-    [studentId, load, setError],
+    [studentId, load, setError, isSchoolLogin],
   );
 
   const onClassChangeForEdit = useCallback(async (classId: string) => {
@@ -152,7 +164,7 @@ export default function StudentDetailScreen() {
   };
 
   const onViewPreview = () => {
-    navigation.navigate('Preview', { studentId });
+    navigation.navigate('Preview', { studentId: student?.id ?? studentId });
   };
 
   const onMarkReceived = async () => {
@@ -241,7 +253,11 @@ export default function StudentDetailScreen() {
     if (!pendingPhotoUri || uploadingPhoto) return;
     setUploadingPhoto(true);
     try {
-      await uploadPhoto(pendingPhotoUri, studentId);
+      if (isSchoolLogin) {
+        await uploadPhoto(pendingPhotoUri, studentId);
+      } else {
+        await uploadStudentPhoto(studentId, pendingPhotoUri);
+      }
       setPendingPhotoUri(null);
       await load();
       Alert.alert('Success', 'Photo uploaded successfully.');
@@ -254,10 +270,14 @@ export default function StudentDetailScreen() {
     } finally {
       setUploadingPhoto(false);
     }
-  }, [pendingPhotoUri, studentId, load, uploadingPhoto]);
+  }, [pendingPhotoUri, studentId, load, uploadingPhoto, isSchoolLogin]);
 
   const canRaiseCorrection = student && !['correction_pending', 'pending'].includes(student.status);
-  const canViewPreview = student && ['preview_sent', 'approved', 'printed', 'delivered', 'received_by_school'].includes(student.status);
+  const canViewPreview =
+    student &&
+    (isSchoolLogin
+      ? ['preview_sent', 'approved', 'printed', 'delivered', 'received_by_school'].includes(student.status)
+      : true);
   const canMarkReceived = student && student.status === 'delivered';
 
   if (loading && !student) {
@@ -386,16 +406,18 @@ export default function StudentDetailScreen() {
           </TouchableOpacity>
         )} */}
 
-        <TouchableOpacity
-          style={[styles.btn, isCompact && styles.btnCompact]}
-          onPress={onShareWhatsapp}
-          activeOpacity={0.85}
-        >
-          <Ionicons name="share-social" size={isCompact ? 18 : 20} color={colors.textInverse} />
-          <Text style={[styles.btnText, isCompact && styles.btnTextCompact]} numberOfLines={2}>
-            Share on WhatsApp
-          </Text>
-        </TouchableOpacity>
+        {isSchoolLogin && (
+          <TouchableOpacity
+            style={[styles.btn, isCompact && styles.btnCompact]}
+            onPress={onShareWhatsapp}
+            activeOpacity={0.85}
+          >
+            <Ionicons name="share-social" size={isCompact ? 18 : 20} color={colors.textInverse} />
+            <Text style={[styles.btnText, isCompact && styles.btnTextCompact]} numberOfLines={2}>
+              Share on WhatsApp
+            </Text>
+          </TouchableOpacity>
+        )}
       </View>
 
       <CorrectionModal

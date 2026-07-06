@@ -21,8 +21,11 @@ import {
   buildEmptyAddStudentForm,
   cardFormToCreatePayload,
   formatCardLabel,
+  getCardFieldPlaceholder,
 } from '../utils/cardFields';
 import type { ClassItem, StudentCreatePayload } from '../types';
+
+type SchoolOption = { id: string; name: string };
 
 interface StudentAddModalProps {
   visible: boolean;
@@ -30,6 +33,10 @@ interface StudentAddModalProps {
   classId: string;
   classOptions?: ClassItem[];
   onClassChange?: (classId: string) => void | Promise<void>;
+  schoolOptions?: SchoolOption[];
+  schoolId?: string;
+  onSchoolChange?: (schoolId: string) => void | Promise<void>;
+  loadingSchools?: boolean;
   loadingFields?: boolean;
   onClose: () => void;
   onSubmit: (payload: StudentCreatePayload) => Promise<void>;
@@ -41,6 +48,10 @@ export default function StudentAddModal({
   classId,
   classOptions = [],
   onClassChange,
+  schoolOptions = [],
+  schoolId = '',
+  onSchoolChange,
+  loadingSchools = false,
   loadingFields = false,
   onClose,
   onSubmit,
@@ -50,17 +61,25 @@ export default function StudentAddModal({
   const [cameraVisible, setCameraVisible] = useState(false);
   const [loading, setLoading] = useState(false);
   const [classDropdownOpen, setClassDropdownOpen] = useState(false);
+  const [schoolDropdownOpen, setSchoolDropdownOpen] = useState(false);
   const [selectedClassId, setSelectedClassId] = useState(classId);
+  const [selectedSchoolId, setSelectedSchoolId] = useState(schoolId);
 
-  // Reset only when the modal opens — not when classId changes after photo pick.
+  // Reset only when the modal opens — not when classId/schoolId changes after photo pick.
   useEffect(() => {
     if (!visible) return;
     setClassDropdownOpen(false);
+    setSchoolDropdownOpen(false);
     setPhotoUri(null);
     if (classOptions.length > 0) {
       setSelectedClassId(classId || '');
     } else {
       setSelectedClassId(classId);
+    }
+    if (schoolOptions.length > 0) {
+      setSelectedSchoolId(schoolId || '');
+    } else {
+      setSelectedSchoolId(schoolId);
     }
   }, [visible]);
 
@@ -114,6 +133,12 @@ export default function StudentAddModal({
   }, [onPickFromGallery]);
 
   const handleSubmit = async () => {
+    const effectiveSchoolId = schoolOptions.length > 0 ? selectedSchoolId : schoolId;
+    if (schoolOptions.length > 0 && !effectiveSchoolId) {
+      Alert.alert('Required', 'Please select a school.');
+      return;
+    }
+
     const effectiveClassId = classOptions.length > 0 ? selectedClassId : classId;
     if (!effectiveClassId) {
       Alert.alert('Required', 'Please select a class.');
@@ -133,7 +158,7 @@ export default function StudentAddModal({
     setLoading(true);
     try {
       const payload = cardFormToCreatePayload(form, effectiveClassId);
-      console.log("Payload data",payload);
+      if (effectiveSchoolId) payload.schoolId = effectiveSchoolId;
       if (photoUri) payload.photoUri = photoUri;
       await onSubmit(payload);
       onClose();
@@ -148,11 +173,15 @@ export default function StudentAddModal({
     if (!loading) onClose();
   };
 
+  const selectedSchoolName =
+    schoolOptions.find((item) => item.id === selectedSchoolId)?.name ?? 'Select school';
   const selectedClassName =
     classOptions.find((item) => item.id === selectedClassId)?.name ?? 'Select class';
+  const hasSchoolSelected = schoolOptions.length === 0 || Boolean(selectedSchoolId);
   const canSave =
     fieldKeys.length > 0 &&
     !loading &&
+    hasSchoolSelected &&
     (classOptions.length === 0 || Boolean(selectedClassId));
 
   return (
@@ -171,6 +200,53 @@ export default function StudentAddModal({
               keyboardShouldPersistTaps="handled"
               showsVerticalScrollIndicator={false}
             >
+              {schoolOptions.length > 0 ? (
+                <View style={styles.field}>
+                  <Text style={styles.label}>School</Text>
+                  <TouchableOpacity
+                    style={styles.dropdownTrigger}
+                    onPress={() => setSchoolDropdownOpen((prev) => !prev)}
+                    disabled={loading || loadingSchools}
+                    activeOpacity={0.85}
+                  >
+                    <Text style={[styles.dropdownText, !selectedSchoolId && styles.placeholderText]}>
+                      {selectedSchoolName}
+                    </Text>
+                    {loadingSchools ? (
+                      <ActivityIndicator color={colors.primary} size="small" />
+                    ) : (
+                      <Ionicons
+                        name={schoolDropdownOpen ? 'chevron-up' : 'chevron-down'}
+                        size={18}
+                        color={colors.textMuted}
+                      />
+                    )}
+                  </TouchableOpacity>
+                  {schoolDropdownOpen ? (
+                    <View style={styles.dropdownList}>
+                      {schoolOptions.map((item) => (
+                        <TouchableOpacity
+                          key={item.id}
+                          style={styles.dropdownItem}
+                          onPress={() => {
+                            setSelectedSchoolId(item.id);
+                            setSelectedClassId('');
+                            setSchoolDropdownOpen(false);
+                            onSchoolChange?.(item.id);
+                          }}
+                          disabled={loading || loadingSchools}
+                          activeOpacity={0.85}
+                        >
+                          <Text style={styles.dropdownItemText}>{item.name}</Text>
+                          {selectedSchoolId === item.id ? (
+                            <Ionicons name="checkmark" size={18} color={colors.primary} />
+                          ) : null}
+                        </TouchableOpacity>
+                      ))}
+                    </View>
+                  ) : null}
+                </View>
+              ) : null}
               <View style={styles.field}>
                 <Text style={styles.label}>Student Photo</Text>
                 {photoUri ? (
@@ -204,7 +280,7 @@ export default function StudentAddModal({
                   <TouchableOpacity
                     style={styles.dropdownTrigger}
                     onPress={() => setClassDropdownOpen((prev) => !prev)}
-                    disabled={loading || loadingFields}
+                    disabled={loading || loadingFields || !hasSchoolSelected}
                     activeOpacity={0.85}
                   >
                     <Text style={[styles.dropdownText, !selectedClassId && styles.placeholderText]}>
@@ -222,9 +298,7 @@ export default function StudentAddModal({
                   </TouchableOpacity>
                   {classDropdownOpen ? (
                     <View style={styles.dropdownList}>
-                      {classOptions.map((item) =>{
-                        // console.log("Field data",item);
-                      return(
+                      {classOptions.map((item) => (
                         <TouchableOpacity
                           key={item.id}
                           style={styles.dropdownItem}
@@ -241,7 +315,7 @@ export default function StudentAddModal({
                             <Ionicons name="checkmark" size={18} color={colors.primary} />
                           ) : null}
                         </TouchableOpacity>
-                      )})}
+                      ))}
                     </View>
                   ) : null}
                 </View>
@@ -252,23 +326,20 @@ export default function StudentAddModal({
                   <Text style={styles.fieldLoaderText}>Loading form fields...</Text>
                 </View>
               ) : visibleFieldKeys.length > 0 ? (
-                visibleFieldKeys.map((key) => 
-                {
-                  console.log("Field data",key);
-                  return(
+                visibleFieldKeys.map((key) => (
                   <View key={key} style={styles.field}>
                     <Text style={styles.label}>{formatCardLabel(key)}</Text>
                     <TextInput
                       style={styles.input}
                       value={form[key] ?? ''}
                       onChangeText={(text) => updateField(key, text)}
-                      placeholder={formatCardLabel(key)}
+                      placeholder={getCardFieldPlaceholder(key)}
                       placeholderTextColor={colors.textMuted}
                       editable={!loading}
                       keyboardType={isMobileField(key) ? 'number-pad' : 'default'}
                     />
                   </View>
-                )})
+                ))
               ) : (
                 <Text style={styles.empty}>No form fields available</Text>
               )}

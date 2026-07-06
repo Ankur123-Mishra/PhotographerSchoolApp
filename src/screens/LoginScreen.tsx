@@ -16,6 +16,7 @@ import Ionicons from 'react-native-vector-icons/Ionicons';
 import { useAuth } from '../context/AuthContext';
 import { colors, spacing, radius, typography, shadow } from '../theme/colors';
 import { generateOtp } from '../Services/mobile-api';
+import type { AuthRole } from '../types';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -25,6 +26,16 @@ export default function LoginScreen() {
   const [otp, setOtp] = useState('');
   const [step, setStep] = useState<'mobile' | 'otp'>('mobile');
   const [loading, setLoading] = useState(false);
+  const [loginRole, setLoginRole] = useState<AuthRole>('school');
+
+  const isPhotographer = loginRole === 'photographer';
+
+  const togglePhotographer = () => {
+    if (loading) return;
+    setLoginRole(isPhotographer ? 'school' : 'photographer');
+    setStep('mobile');
+    setOtp('');
+  };
 
   const onSendOtp = async () => {
     const m = mobile.replace(/\D/g, '');
@@ -34,7 +45,7 @@ export default function LoginScreen() {
     }
     setLoading(true);
     try {
-      await generateOtp(m);
+      await generateOtp(m, loginRole);
       
       setStep('otp');
       setOtp('');
@@ -54,7 +65,7 @@ export default function LoginScreen() {
     }
     setLoading(true);
     try {
-      const ok = await login(mobile.trim(), otp);
+      const ok = await login(mobile.trim(), otp, loginRole);
       if (!ok) Alert.alert('Error', 'Invalid OTP. Please try again.');
     } catch (e) {
       Alert.alert('Error', 'Login failed. Please try again.');
@@ -137,6 +148,26 @@ export default function LoginScreen() {
               ) : (
                 <Text style={styles.btnText}>Send OTP</Text>
               )}
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.photographerCheck}
+              onPress={togglePhotographer}
+              disabled={loading}
+              activeOpacity={0.7}
+            >
+              <Ionicons
+                name={isPhotographer ? 'checkbox' : 'square-outline'}
+                size={16}
+                color={isPhotographer ? colors.primary : colors.textMuted}
+              />
+              <Text
+                style={[
+                  styles.photographerCheckText,
+                  isPhotographer && styles.photographerCheckTextActive,
+                ]}
+              >
+                Login as Photographer
+              </Text>
             </TouchableOpacity>
           </>
         ) : (
@@ -278,6 +309,7 @@ const styles = StyleSheet.create({
     borderRadius: radius.xl,
     padding: spacing.xl,
     borderWidth: 1,
+    marginTop: spacing.xl,
     borderColor: colors.borderLight,
     ...shadow.lg,
   },
@@ -353,6 +385,22 @@ const styles = StyleSheet.create({
     color: colors.textMuted,
     marginTop: spacing.sm,
     marginBottom: spacing.lg,
+  },
+  photographerCheck: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-end',
+    gap: 6,
+    marginTop: spacing.lg,
+    paddingVertical: spacing.xs,
+  },
+  photographerCheckText: {
+    fontSize: 12,
+    color: colors.textMuted,
+  },
+  photographerCheckTextActive: {
+    color: colors.primary,
+    fontWeight: '600',
   },
   btn: {
     backgroundColor: colors.primary,

@@ -17,28 +17,49 @@ import SearchBar from '../components/SearchBar';
 import FilterModal from '../components/FilterModal';
 import StudentAddModal from '../components/StudentAddModal';
 import Loader from '../components/Loader';
-import type { MainStackParamList } from '../navigation/types';
+import type { MainStackParamList, PhotographerStackParamList } from '../navigation/types';
 import type { Student, StudentStatus, StudentCreatePayload } from '../types';
-import { createStudent, resolveAddStudentFieldKeys } from '../Services/api';
+import { createStudent, resolveAddStudentFieldKeys, fetchPhotographerStudents } from '../Services/api';
 import { colors, spacing, radius, typography } from '../theme/colors';
 
-type Nav = NativeStackNavigationProp<MainStackParamList, 'StudentList'>;
-type StudentListRoute = RouteProp<MainStackParamList, 'StudentList'>;
+type Nav = NativeStackNavigationProp<MainStackParamList & PhotographerStackParamList, 'StudentList'>;
+type StudentListRoute = RouteProp<MainStackParamList & PhotographerStackParamList, 'StudentList'>;
 
 export default function StudentListScreen() {
   const { params } = useRoute<StudentListRoute>();
   const classId = params?.classId ?? '';
   const className = params?.className ?? '';
+  const schoolId = params?.schoolId;
+  const isPhotographerMode = !!schoolId;
   const listMode = params?.listMode ?? 'class';
   const isPendingMode = listMode === 'pending';
   const navigation = useNavigation<Nav>();
   const {
-    students,
-    loading,
+    students: contextStudents,
+    loading: contextLoading,
     loadStudentsByClass,
     loadPendingStudents,
     refreshDashboard,
   } = useStudents();
+
+  const [photographerStudents, setPhotographerStudents] = useState<Student[]>([]);
+  const [photographerLoading, setPhotographerLoading] = useState(false);
+
+  const students = isPhotographerMode ? photographerStudents : contextStudents;
+  const loading = isPhotographerMode ? photographerLoading : contextLoading;
+
+  const loadPhotographerStudents = useCallback(async () => {
+    if (!schoolId || !classId) return;
+    setPhotographerLoading(true);
+    try {
+      const list = await fetchPhotographerStudents(schoolId, classId);
+      setPhotographerStudents(list);
+    } catch {
+      setPhotographerStudents([]);
+    } finally {
+      setPhotographerLoading(false);
+    }
+  }, [schoolId, classId]);
 
   const [searchQuery, setSearchQuery] = useState('');
   const [filterStatus, setFilterStatus] = useState<StudentStatus | 'all'>('all');
@@ -49,6 +70,10 @@ export default function StudentListScreen() {
 
   useFocusEffect(
     useCallback(() => {
+      if (isPhotographerMode) {
+        loadPhotographerStudents();
+        return;
+      }
       if (isPendingMode) {
         loadPendingStudents();
         return;
@@ -56,7 +81,14 @@ export default function StudentListScreen() {
       if (classId) {
         loadStudentsByClass(classId);
       }
-    }, [classId, isPendingMode, loadPendingStudents, loadStudentsByClass])
+    }, [
+      classId,
+      isPendingMode,
+      isPhotographerMode,
+      loadPhotographerStudents,
+      loadPendingStudents,
+      loadStudentsByClass,
+    ]),
   );
 
   const filtered = useMemo(() => {
@@ -80,16 +112,31 @@ export default function StudentListScreen() {
   }, [students, searchQuery, filterStatus]);
 
   const onRefresh = useCallback(() => {
+    if (isPhotographerMode) {
+      loadPhotographerStudents();
+      return;
+    }
     if (isPendingMode) {
       loadPendingStudents();
     } else if (classId) {
       loadStudentsByClass(classId);
     }
     refreshDashboard();
-  }, [classId, isPendingMode, loadPendingStudents, loadStudentsByClass, refreshDashboard]);
+  }, [
+    classId,
+    isPendingMode,
+    isPhotographerMode,
+    loadPhotographerStudents,
+    loadPendingStudents,
+    loadStudentsByClass,
+    refreshDashboard,
+  ]);
 
   const onStudentPress = (student: Student) => {
-    navigation.navigate('StudentDetail', { studentId: student.id });
+    navigation.navigate('StudentDetail', {
+      studentId: student.id,
+      previewData: student.previewData,
+    });
   };
 
   const onOpenAddStudent = useCallback(async () => {
@@ -109,11 +156,15 @@ export default function StudentListScreen() {
   const onAddStudent = useCallback(
     async (payload: StudentCreatePayload) => {
       await createStudent(payload);
-      await loadStudentsByClass(classId);
-      refreshDashboard();
+      if (isPhotographerMode) {
+        await loadPhotographerStudents();
+      } else {
+        await loadStudentsByClass(classId);
+        refreshDashboard();
+      }
       Alert.alert('Success', 'Student added successfully.');
     },
-    [classId, loadStudentsByClass, refreshDashboard],
+    [classId, isPhotographerMode, loadPhotographerStudents, loadStudentsByClass, refreshDashboard],
   );
 
   const totalCount = students.length;
@@ -191,7 +242,7 @@ export default function StudentListScreen() {
         onClose={() => setFilterVisible(false)}
       />
       <StudentAddModal
-        visible={addVisible}
+        visible={addVisible && !isPhotographerMode}
         fieldKeys={addFieldKeys}
         classId={classId}
         onClose={() => setAddVisible(false)}

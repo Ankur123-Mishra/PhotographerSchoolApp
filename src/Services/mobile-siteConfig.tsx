@@ -30,15 +30,22 @@ export const mobile_siteConfig = Object.freeze({
     PREVIEW_APPROVE: (studentId: string) => `api/school/preview/${studentId}/approve`,
     /** PUT api/school/deliveries/confirm-student - confirm student received. Body: { studentId } */
     CONFIRM_STUDENT: 'api/school/deliveries/confirm-student',
+    /** POST api/school/photos/upload — student photo upload (Bearer). */
+    PHOTOS_UPLOAD: 'api/school/photos/upload',
   }),
 
   /** Photographer API endpoints (Bearer token required) */
   PHOTOGRAPHER_ENDPOINTS: Object.freeze({
+    ME: 'api/photographer/me',
     DASHBOARD: 'api/photographer/dashboard',
     ASSIGNED_SCHOOLS: 'api/photographer/schools/assigned',
     CLASSES: 'api/photographer/classes',
     STUDENTS: 'api/photographer/students',
+    /** GET api/photographer/students/:studentId — student detail (Bearer). */
+    STUDENT_DETAIL: (studentId: string) => `api/photographer/students/${studentId}`,
+    /** GET api/photographer/preview/:studentId — ID card preview (Bearer). */
+    PREVIEW: (studentId: string) => `api/photographer/preview/${studentId}`,
     TEMPLATES_STATUS: 'api/photographer/templates/status',
-    PHOTOS_UPLOAD: 'api/school/photos/upload',
+    PHOTOS_UPLOAD: 'api/photographer/photos/upload',
   }),
 });

@@ -13,9 +13,10 @@ import { StudentProvider } from './src/context/StudentContext';
 import SplashScreen from './src/screens/SplashScreen';
 import AuthStack from './src/navigation/AuthStack';
 import BottomTabs from './src/navigation/BottomTabs';
+import PhotographerBottomTabs from './src/navigation/PhotographerBottomTabs';
 
 function AppContent() {
-  const { isLoggedIn, isReady } = useAuth();
+  const { isLoggedIn, isReady, user } = useAuth();
 
   if (!isReady) {
     return <SplashScreen />;
@@ -29,7 +30,7 @@ function AppContent() {
   }
   return (
     <NavigationContainer>
-      <BottomTabs />
+      {user?.role === 'photographer' ? <PhotographerBottomTabs /> : <BottomTabs />}
     </NavigationContainer>
   );
 }

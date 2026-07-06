@@ -14,80 +14,19 @@ import {
 import Ionicons from 'react-native-vector-icons/Ionicons';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import { useAuth } from '../context/AuthContext';
 import { useStudents } from '../context/StudentContext';
 import ApprovalModal from '../components/ApprovalModal';
 import Loader from '../components/Loader';
-import type { MainStackParamList } from '../navigation/types';
+import type { MainStackParamList, PhotographerStackParamList } from '../navigation/types';
+import type { ApiPreviewResponse, ApiPreviewStudent, ApiTemplateElement } from '../types/preview';
 import { colors, spacing, radius, typography, shadow } from '../theme/colors';
+import { fetchPhotographerPreview } from '../Services/api';
 import { getSchoolPreview } from '../Services/mobile-api';
 import { mobile_siteConfig } from '../Services/mobile-siteConfig';
 
-type Nav = NativeStackNavigationProp<MainStackParamList, 'Preview'>;
-type PreviewRoute = RouteProp<MainStackParamList, 'Preview'>;
-
-/** Preview API response shape */
-type ApiPreviewStudent = {
-  _id: string;
-  schoolId:
-    | string
-    | {
-        _id: string;
-        schoolName?: string;
-        dimension?: { width?: unknown; height?: unknown };
-        dimensionUnit?: string;
-      };
-  classId: string | { _id: string; className?: string; section?: string };
-  class?: { _id?: string; className?: string; class_name?: string; section?: string };
-  school?: {
-    _id?: string;
-    schoolName?: string;
-    address?: string;
-    dimension?: { width?: number; height?: number };
-    dimensionUnit?: string;
-  };
-  uniqueCode?: string;
-  studentName: string;
-  address?: string;
-  photoUrl?: string;
-  colorCodePhotoUrl?: string;
-  mobile?: string;
-  dob?: string;
-  status?: string;
-  extraFields?: Record<string, unknown>;
-  [key: string]: unknown;
-};
-
-type ApiTemplateElement = {
-  type: 'photo' | 'text' | 'colorCode';
-  id: string;
-  dataField?: string;
-  x: number;
-  y: number;
-  width?: number;
-  height?: number;
-  fontSize?: number;
-  content?: string;
-  fontWeight?: string;
-  label?: string;
-  textAlign?: string;
-  textVerticalAlign?: string;
-};
-
-type ApiTemplate = {
-  _id: string;
-  name?: string;
-  frontImage?: string;
-  backImage?: string;
-  elements?: ApiTemplateElement[];
-  backElements?: ApiTemplateElement[];
-  [key: string]: unknown;
-};
-
-type ApiPreviewResponse = {
-  preview?: { templateId?: string; [key: string]: unknown };
-  student?: ApiPreviewStudent;
-  template?: ApiTemplate;
-};
+type Nav = NativeStackNavigationProp<MainStackParamList & PhotographerStackParamList, 'Preview'>;
+type PreviewRoute = RouteProp<MainStackParamList & PhotographerStackParamList, 'Preview'>;
 
 function getFullPhotoUrl(photoUrl: string | undefined): string | null {
   if (!photoUrl || !photoUrl.trim()) return null;
@@ -294,6 +233,8 @@ export default function PreviewScreen() {
   const { params } = useRoute<PreviewRoute>();
   const { studentId } = params;
   const navigation = useNavigation<Nav>();
+  const { user } = useAuth();
+  const isPhotographer = user?.role === 'photographer';
   const { approveStudentPreview, rejectStudentPreview } = useStudents();
   const [previewData, setPreviewData] = useState<ApiPreviewResponse | null>(null);
   const [loading, setLoading] = useState(true);
@@ -307,17 +248,48 @@ export default function PreviewScreen() {
     setLoading(true);
     setError(null);
     try {
-      const data = await getSchoolPreview(studentId) as ApiPreviewResponse;
-      console.log('=== getSchoolPreview === ', data);
+      if (isPhotographer) {
+        console.log('=== PreviewScreen load (photographer) ===', { studentId });
+      }
+      const data = isPhotographer
+        ? await fetchPhotographerPreview(studentId)
+        : ((await getSchoolPreview(studentId)) as ApiPreviewResponse);
+      if (isPhotographer) {
+        console.log('=== PreviewScreen load success (photographer) ===', {
+          studentId,
+          hasStudent: !!data?.student,
+          hasTemplate: !!data?.template,
+        });
+      }
       setPreviewData(data);
     } catch (e) {
-      const message = e && typeof e === 'object' && 'message' in e ? String((e as { message: unknown }).message) : 'Failed to load preview';
+      if (isPhotographer) {
+        console.log('=== PreviewScreen load error (photographer) ===', {
+          studentId,
+          error: e,
+        });
+      }
+      const axiosMessage =
+        e &&
+        typeof e === 'object' &&
+        'response' in e &&
+        (e as { response?: { data?: { message?: string; error?: string } } }).response?.data
+          ? (e as { response?: { data?: { message?: string; error?: string } } }).response?.data
+              ?.message ||
+            (e as { response?: { data?: { message?: string; error?: string } } }).response?.data
+              ?.error
+          : undefined;
+      const message =
+        axiosMessage ||
+        (e && typeof e === 'object' && 'message' in e
+          ? String((e as { message: unknown }).message)
+          : 'Failed to load preview');
       setError(message);
       setPreviewData(null);
     } finally {
       setLoading(false);
     }
-  }, [studentId]);
+  }, [studentId, isPhotographer]);
 
   useEffect(() => {
     load();
@@ -358,7 +330,7 @@ export default function PreviewScreen() {
   const backTemplateUri = getFullAssetUrl(template?.backImage);
   const studentPhotoUri = getFullPhotoUrl(student?.photoUrl);
   const studentColorCodeUri = getFullPhotoUrl(student?.colorCodePhotoUrl);
-  const canApproveReject = student && student.status === 'preview_sent';
+  const canApproveReject = !isPhotographer && student && student.status === 'preview_sent';
   const cardLayout = getPreviewCardLayout(student, windowWidth, spacing.lg);
   const renderTemplateElements = (elements: ApiTemplateElement[]) =>
     elements.map((element) => {
@@ -566,7 +538,7 @@ export default function PreviewScreen() {
           </TouchableOpacity>
         </View>
       )}
-      {student!.status !== 'preview_sent' && (
+      {!isPhotographer && student!.status !== 'preview_sent' && (
         <View style={styles.hintWrap}>
           <Ionicons name="information-circle-outline" size={20} color={colors.textMuted} />
           <Text style={styles.hint}>Status: {student!.status}. Approve/Reject not available.</Text>

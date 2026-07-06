@@ -1,3 +1,7 @@
+import type { ApiPreviewResponse } from './preview';
+
+export type { ApiPreviewResponse, ApiPreviewStudent, ApiTemplate, ApiTemplateElement } from './preview';
+
 /** Student status for ID card workflow */
 export type StudentStatus =
   | 'pending'
@@ -22,6 +26,8 @@ export type StudentCardFields = Record<string, string | number | boolean | null 
 /** Body for POST api/school/students (multipart/form-data) */
 export interface StudentCreatePayload extends StudentUpdatePayload {
   classId: string;
+  /** Required for photographer create — POST api/photographer/students. */
+  schoolId?: string;
   /** Local file URI for student photo — sent as form field `photo`. */
   photoUri?: string;
   /** Local file URI for house logo — sent as form field `housePhoto`. */
@@ -75,6 +81,8 @@ export interface Student {
   status: StudentStatus;
   photoUri?: string;
   previewUri?: string;
+  /** Template preview payload from photographer student detail API. */
+  previewData?: ApiPreviewResponse;
   correctionReason?: string;
   /** For delivery screen */
   deliveredAt?: string;
@@ -98,14 +106,48 @@ export interface SchoolProfile {
   schoolCode?: string;
 }
 
+export type AuthRole = 'school' | 'photographer';
+
 export interface AuthUser {
   id?: string;
   name?: string;
   mobile: string;
-  role?: string;
+  role?: AuthRole | string;
   schoolId?: string;
   token?: string;
   school?: SchoolProfile;
+}
+
+export interface PhotographerSchool {
+  id: string;
+  name: string;
+  code?: string;
+  address?: string;
+}
+
+export interface PhotographerProfile {
+  id: string;
+  name: string;
+  mobile?: string;
+  email?: string;
+  role?: string;
+  isActive?: boolean;
+  parentCollectionEnabled?: boolean;
+  accessDurationValue?: number;
+  accessDurationUnit?: string;
+  accessExpiresAt?: string;
+  pointsBalance?: number;
+  perStudentTemplateCost?: number;
+  assignedSchools?: number;
+  latestWalletTransaction?: {
+    id: string;
+    type?: string;
+    points?: number;
+    action?: string;
+    note?: string;
+    balanceAfter?: number;
+    createdAt?: string;
+  };
 }
 
 /** Single field change on a correction request */

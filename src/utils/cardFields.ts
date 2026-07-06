@@ -14,6 +14,18 @@ export function formatCardLabel(key: string): string {
     .replace(/^./, (c) => c.toUpperCase());
 }
 
+export function isDateOfBirthField(key: string): boolean {
+  const norm = normalizeKey(key);
+  return norm === 'dob' || norm === 'dateofbirth' || norm === 'birthdate';
+}
+
+export function getCardFieldPlaceholder(key: string): string {
+  if (isDateOfBirthField(key)) {
+    return 'dd/mm/yyyy';
+  }
+  return formatCardLabel(key);
+}
+
 function normalizeKey(key: string): string {
   return key.toLowerCase().replace(/[^a-z0-9]/g, '');
 }
@@ -206,6 +218,17 @@ export function getStudentDisplayName(student: Student): string {
 }
 
 const SKIP_TEMPLATE_KEYS = new Set(['photo', 'photourl', 'colorcode', 'colorcodephoto']);
+
+/** Text field keys from a preview/card template (front + back elements). */
+export function extractFieldKeysFromPreviewTemplate(
+  template: { elements?: Array<{ type?: string; dataField?: string }>; backElements?: Array<{ type?: string; dataField?: string }> } | undefined,
+): string[] {
+  if (!template) return [];
+  return mergeTemplateFieldKeys(
+    extractTemplateDataFields(template.elements),
+    extractTemplateDataFields(template.backElements),
+  );
+}
 
 /** Text field keys from ID card template elements (preview API). */
 export function extractTemplateDataFields(

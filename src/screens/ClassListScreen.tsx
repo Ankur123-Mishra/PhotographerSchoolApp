@@ -7,14 +7,18 @@ import { useStudents } from '../context/StudentContext';
 import Loader from '../components/Loader';
 import SearchBar from '../components/SearchBar';
 import StudentCard from '../components/StudentCard';
-import { searchStudentsGlobal } from '../Services/api';
-import type { MainStackParamList } from '../navigation/types';
+import {
+  searchStudentsGlobal,
+  searchPhotographerStudentsInSchool,
+  fetchPhotographerClasses,
+} from '../Services/api';
+import type { MainStackParamList, PhotographerStackParamList } from '../navigation/types';
 import type { ClassItem, Student } from '../types';
 import { colors, spacing, radius, typography, shadow } from '../theme/colors';
 import { sortClassItems } from '../utils/classSort';
 
-type Nav = NativeStackNavigationProp<MainStackParamList, 'ClassList'>;
-type ClassListRoute = RouteProp<MainStackParamList, 'ClassList'>;
+type Nav = NativeStackNavigationProp<MainStackParamList & PhotographerStackParamList, 'ClassList'>;
+type ClassListRoute = RouteProp<MainStackParamList & PhotographerStackParamList, 'ClassList'>;
 
 const formatClassName = (name: string) => {
   if (!name) return '';
@@ -31,13 +35,33 @@ const formatClassName = (name: string) => {
 
 export default function ClassListScreen() {
   const { params } = useRoute<ClassListRoute>();
+  const schoolId = params?.schoolId;
+  const isPhotographerMode = !!schoolId;
   const navigation = useNavigation<Nav>();
   const { classes, loading, refreshClasses } = useStudents();
+  const [photographerClasses, setPhotographerClasses] = useState<ClassItem[]>([]);
+  const [photographerLoading, setPhotographerLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<Student[]>([]);
   const [searchLoading, setSearchLoading] = useState(false);
 
-  const sortedClasses = useMemo(() => sortClassItems(classes), [classes]);
+  const activeClasses = isPhotographerMode ? photographerClasses : classes;
+  const activeLoading = isPhotographerMode ? photographerLoading : loading;
+
+  const loadPhotographerClasses = useCallback(async () => {
+    if (!schoolId) return;
+    setPhotographerLoading(true);
+    try {
+      const list = await fetchPhotographerClasses(schoolId);
+      setPhotographerClasses(list);
+    } catch {
+      setPhotographerClasses([]);
+    } finally {
+      setPhotographerLoading(false);
+    }
+  }, [schoolId]);
+
+  const sortedClasses = useMemo(() => sortClassItems(activeClasses), [activeClasses]);
   const isSearching = searchQuery.trim().length > 0;
 
   useEffect(() => {
@@ -50,7 +74,12 @@ export default function ClassListScreen() {
 
     let cancelled = false;
     setSearchLoading(true);
-    searchStudentsGlobal(q)
+    const searchPromise =
+      isPhotographerMode && schoolId
+        ? searchPhotographerStudentsInSchool(schoolId, q)
+        : searchStudentsGlobal(q);
+
+    searchPromise
       .then((results) => {
         if (!cancelled) setSearchResults(results);
       })
@@ -64,36 +93,35 @@ export default function ClassListScreen() {
     return () => {
       cancelled = true;
     };
-  }, [searchQuery]);
+  }, [searchQuery, isPhotographerMode, schoolId]);
 
   useFocusEffect(
     useCallback(() => {
-      refreshClasses();
-    }, [refreshClasses]),
+      if (isPhotographerMode) {
+        loadPhotographerClasses();
+      } else {
+        refreshClasses();
+      }
+    }, [isPhotographerMode, loadPhotographerClasses, refreshClasses]),
   );
 
   const onClassPress = (item: ClassItem) => {
-    navigation.navigate('StudentList', { classId: item.id, className: formatClassName(item.name) });
+    navigation.navigate('StudentList', {
+      classId: item.id,
+      className: formatClassName(item.name),
+      ...(schoolId ? { schoolId, schoolName: params?.schoolName } : {}),
+    });
   };
 
   const onStudentPress = (student: Student) => {
-    navigation.navigate('StudentDetail', { studentId: student.id });
+    navigation.navigate('StudentDetail', {
+      studentId: student.id,
+      ...(student.previewData ? { previewData: student.previewData } : {}),
+    });
   };
 
-  if (loading && classes.length === 0 && !isSearching) {
+  if (activeLoading && activeClasses.length === 0 && !isSearching) {
     return <Loader message="Loading classes..." />;
-  }
-
-  if (classes.length === 0 && !isSearching) {
-    return (
-      <View style={styles.empty}>
-        <View style={styles.emptyIcon}>
-          <Ionicons name="school-outline" size={48} color={colors.textMuted} />
-        </View>
-        <Text style={styles.emptyText}>No classes found</Text>
-        <Text style={styles.emptySub}>Classes will appear here when available.</Text>
-      </View>
-    );
   }
 
   const searchBar = (
@@ -105,6 +133,21 @@ export default function ClassListScreen() {
       />
     </View>
   );
+
+  if (activeClasses.length === 0 && !isSearching) {
+    return (
+      <View style={styles.container}>
+        {searchBar}
+        <View style={styles.empty}>
+          <View style={styles.emptyIcon}>
+            <Ionicons name="school-outline" size={48} color={colors.textMuted} />
+          </View>
+          <Text style={styles.emptyText}>No classes found</Text>
+          <Text style={styles.emptySub}>Classes will appear here when available.</Text>
+        </View>
+      </View>
+    );
+  }
 
   if (isSearching) {
     return (

@@ -21,6 +21,7 @@ import {
   buildStudentEditForm,
   cardFormToUpdatePayload,
   formatCardLabel,
+  getCardFieldPlaceholder,
   getStudentFormFieldEntries,
   studentToBasePayload,
 } from '../utils/cardFields';
@@ -230,7 +231,7 @@ export default function StudentEditModal({
                     style={styles.input}
                     value={form[key] ?? ''}
                     onChangeText={(text) => updateCardField(key, text)}
-                    placeholder={formatCardLabel(key)}
+                    placeholder={getCardFieldPlaceholder(key)}
                     placeholderTextColor={colors.textMuted}
                     editable={!loading}
                     keyboardType={isMobileField(key) ? 'number-pad' : 'default'}

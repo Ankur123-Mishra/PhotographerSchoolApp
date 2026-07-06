@@ -1,4 +1,5 @@
 import React, { createContext, useCallback, useContext, useState } from 'react';
+import { useAuth } from './AuthContext';
 import type { Student, DashboardStats, ClassItem, StudentStatus } from '../types';
 import {
   fetchDashboardStats,
@@ -6,6 +7,7 @@ import {
   fetchStudentsByClass,
   fetchPendingTemplateStudents,
   fetchStudentDetail,
+  fetchPhotographerStudentDetail,
   fetchDeliveryList,
   approvePreview,
   rejectPreview,
@@ -51,6 +53,7 @@ const defaultStats: DashboardStats = {
 };
 
 export function StudentProvider({ children }: { children: React.ReactNode }) {
+  const { user } = useAuth();
   const [state, setState] = useState<StudentState>({
     dashboardStats: null,
     classes: [],
@@ -121,13 +124,15 @@ export function StudentProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const getStudentDetail = useCallback(async (id: string): Promise<Student | null> => {
-    // console.log("getStudentDetail id", id)
     try {
+      if (user?.role === 'photographer') {
+        return await fetchPhotographerStudentDetail(id);
+      }
       return await fetchStudentDetail(id);
     } catch {
       return null;
     }
-  }, []);
+  }, [user?.role]);
 
   const refreshDeliveryList = useCallback(async () => {
     try {

@@ -4,7 +4,7 @@ import { mobile_siteConfig } from './mobile-siteConfig';
 import { getDataFromAsyncStorage } from './CommonFunction';
 import axios from 'axios';
 
-export async function postData(data, urlPath) {
+export async function postData(data: unknown, urlPath: string) {
   return new Promise((resolve, reject) => {
     axios
       .post(`${mobile_siteConfig.BASE_URL}${urlPath}`, data, {
@@ -34,7 +34,7 @@ export async function postData(data, urlPath) {
   });
 }
 
-export async function postDataWithToken(data, urlPath) {
+export async function postDataWithToken(data: unknown, urlPath: string) {
   try {
     const token = await getDataFromAsyncStorage(
       mobile_siteConfig.MOB_ACCESS_TOKEN_KEY,
@@ -59,7 +59,7 @@ export async function postDataWithToken(data, urlPath) {
   }
 }
 
-export async function deleteDataWithToken(urlPath) {
+export async function deleteDataWithToken(urlPath: string) {
   try {
     const token = await getDataFromAsyncStorage(
       mobile_siteConfig.MOB_ACCESS_TOKEN_KEY,
@@ -84,7 +84,7 @@ export async function deleteDataWithToken(urlPath) {
   }
 }
 
-export async function getDataWithToken(data, urlPath) {
+export async function getDataWithToken(data: unknown, urlPath: string) {
   console.log(
     '=== getDataWithToken URL ===',
     mobile_siteConfig.BASE_URL + urlPath,
@@ -110,7 +110,7 @@ export async function getDataWithToken(data, urlPath) {
   }
 }
 
-export async function PutDataWithToken(data, urlPath) {
+export async function PutDataWithToken(data: unknown, urlPath: string) {
   try {
     console.log(
       '=== PutDataWithToken URL ===',
@@ -121,7 +121,7 @@ export async function PutDataWithToken(data, urlPath) {
       mobile_siteConfig.MOB_ACCESS_TOKEN_KEY,
     );
 
-    const headers = {
+    const headers: Record<string, string> = {
       Accept: '*/*',
       Authorization: `Bearer ${token}`,
     };
@@ -153,7 +153,7 @@ export async function PutDataWithToken(data, urlPath) {
   }
 }
 
-export async function PatchDataWithToken(data, urlPath) {
+export async function PatchDataWithToken(data: unknown, urlPath: string) {
   try {
     console.log(
       '=== PatchDataWithToken URL ===',
@@ -166,7 +166,7 @@ export async function PatchDataWithToken(data, urlPath) {
     );
 
     // Prepare headers
-    const headers = {
+    const headers: Record<string, string> = {
       Accept: '*/*',
       Authorization: `Bearer ${token}`,
     };
@@ -190,7 +190,7 @@ export async function PatchDataWithToken(data, urlPath) {
   }
 }
 
-export const deleteDataWithTokenNew = async (data, url) => {
+export const deleteDataWithTokenNew = async (data: unknown, url: string) => {
   try {
     const token = await getDataFromAsyncStorage(
       mobile_siteConfig.MOB_ACCESS_TOKEN_KEY,
@@ -203,26 +203,30 @@ export const deleteDataWithTokenNew = async (data, url) => {
       data,
     });
     return response;
-  } catch (error) {
+  } catch {
     // ... error handling
   }
 };
 
 
 
-/** Generate OTP – POST api/public/generate-otp (no token). Body: { mobile, role: 'photographer' } */
-export async function generateOtp(mobile: string) {
-  const data = { mobile: mobile.replace(/\D/g, ''), role: 'school' };
+/** Generate OTP – POST api/public/generate-otp (no token). Body: { mobile, role }. */
+export async function generateOtp(mobile: string, role: 'school' | 'photographer' = 'school') {
+  const data = { mobile: mobile.replace(/\D/g, ''), role };
   console.log('=== generateOtp === ', data);
   return postData(data, mobile_siteConfig.API_ENDPOINTS.GENERATE_OTP);
 }
 
-/** Verify OTP / Login – POST api/public/verify-otp (no token). Body: { mobile, otp, role: 'school' }. Returns { message, token, user }. */
-export async function verifyOtp(mobile: string, otp: string) {
+/** Verify OTP / Login – POST api/public/verify-otp (no token). Body: { mobile, otp, role }. Returns { message, token, user }. */
+export async function verifyOtp(
+  mobile: string,
+  otp: string,
+  role: 'school' | 'photographer' = 'school',
+) {
   const data = {
     mobile: mobile.replace(/\D/g, ''),
     otp,
-    role: 'school',
+    role,
   };
   return postData(data, mobile_siteConfig.API_ENDPOINTS.VERIFY_OTP);
 }
@@ -352,7 +356,7 @@ export async function postFormDataWithToken(formData: FormData, urlPath: string)
           .join('; ');
         if (details) errMessage = `${errMessage}: ${details}`;
       }
-    } catch (_) {}
+    } catch {}
     const err = new Error(errMessage) as Error & { response?: { data?: { message?: string } } };
     err.response = { data: { message: errMessage } };
     throw err;
@@ -484,6 +488,12 @@ export async function getDashboard() {
   return response?.data ?? response;
 }
 
+/** Photographer profile – GET api/photographer/me with Bearer token. */
+export async function getPhotographerProfile() {
+  const response = await getDataWithToken(null, mobile_siteConfig.PHOTOGRAPHER_ENDPOINTS.ME);
+  return response?.data ?? response;
+}
+
 /** Assigned schools – GET api/photographer/schools/assigned with Bearer token. Returns { schools: [{ _id, schoolName, schoolCode, address }] }. */
 export async function getAssignedSchools() {
   const response = await getDataWithToken(null, mobile_siteConfig.PHOTOGRAPHER_ENDPOINTS.ASSIGNED_SCHOOLS);
@@ -505,6 +515,87 @@ export async function getStudents(schoolId: string, classId: string) {
   return response?.data ?? response;
 }
 
+/** Student detail – GET api/photographer/students/:studentId with Bearer token. */
+export async function getPhotographerStudentDetail(studentId: string) {
+  const path = mobile_siteConfig.PHOTOGRAPHER_ENDPOINTS.STUDENT_DETAIL(studentId);
+  const response = await getDataWithToken(null, path);
+  return response?.data ?? response;
+}
+
+/** Photographer preview card – GET api/photographer/preview/:studentId with Bearer token. */
+export async function getPhotographerPreview(studentId: string) {
+  const path = mobile_siteConfig.PHOTOGRAPHER_ENDPOINTS.PREVIEW(studentId);
+  const url = `${mobile_siteConfig.BASE_URL}${path}`;
+  console.log('=== getPhotographerPreview ===', { studentId, path, url });
+  const response = await getDataWithToken(null, path);
+  const data = response?.data ?? response;
+  console.log('=== getPhotographerPreview response ===', JSON.stringify(data, null, 2));
+  return data;
+}
+
+/** Photographer student create – POST api/photographer/students multipart/form-data with Bearer token. */
+export async function createPhotographerStudent(body: {
+  schoolId: string;
+  classId: string;
+  studentName: string;
+  admissionNo: string;
+  rollNo: string;
+  fatherName: string;
+  motherName: string;
+  dob: string;
+  mobile: string;
+  address: string;
+  gender: string;
+  bloodGroup: string;
+  house: string;
+  photoNo: string;
+  extraFields?: Record<string, string>;
+  photoUri?: string;
+  housePhotoUri?: string;
+}) {
+  const formData = new FormData();
+  formData.append('schoolId', body.schoolId);
+  formData.append('classId', body.classId);
+  formData.append('studentName', body.studentName.trim());
+
+  const optionalFields: [string, string][] = [
+    ['admissionNo', body.admissionNo],
+    ['rollNo', body.rollNo],
+    ['fatherName', body.fatherName],
+    ['motherName', body.motherName],
+    ['dob', body.dob],
+    ['mobile', body.mobile],
+    ['gender', body.gender],
+    ['bloodGroup', body.bloodGroup],
+    ['house', body.house],
+    ['photoNo', body.photoNo],
+    ['address', body.address],
+  ];
+  for (const [key, value] of optionalFields) {
+    const trimmed = value?.trim();
+    if (trimmed) formData.append(key, trimmed);
+  }
+
+  for (const [key, value] of Object.entries(body.extraFields ?? {})) {
+    const trimmed = value.trim();
+    if (trimmed) formData.append(key, trimmed);
+  }
+
+  if (body.photoUri) appendImageFile(formData, 'photo', body.photoUri);
+  if (body.housePhotoUri) appendImageFile(formData, 'housePhoto', body.housePhotoUri);
+
+  return postFormDataWithToken(formData, mobile_siteConfig.PHOTOGRAPHER_ENDPOINTS.STUDENTS);
+}
+
+/** Photographer student update – PUT api/photographer/students/:studentId with Bearer token. */
+export async function updatePhotographerStudent(
+  studentId: string,
+  body: Record<string, unknown>,
+) {
+  const path = mobile_siteConfig.PHOTOGRAPHER_ENDPOINTS.STUDENT_DETAIL(studentId);
+  return PutDataWithToken(body, path);
+}
+
 /** Template status by school and class – GET api/photographer/templates/status?schoolId=xxx&classId=xxx. Returns { students, total, withTemplates, withoutTemplates, summary }. */
 export async function getTemplatesStatus(schoolId: string, classId: string) {
   const path = `${mobile_siteConfig.PHOTOGRAPHER_ENDPOINTS.TEMPLATES_STATUS}?schoolId=${encodeURIComponent(schoolId)}&classId=${encodeURIComponent(classId)}`;
@@ -512,35 +603,22 @@ export async function getTemplatesStatus(schoolId: string, classId: string) {
   return response?.data ?? response;
 }
 
-/** Photo upload – POST api/photographer/photos/upload multipart/form-data: photo (file), studentId. Bearer token. Optional deviceInfo if backend expects it. */
-export async function uploadPhoto(
-  photoUri: string,
+async function postPhotoUpload(
+  urlPath: string,
   studentId: string,
+  photoUri: string,
   deviceInfo?: string,
 ) {
   const token = await getDataFromAsyncStorage(
     mobile_siteConfig.MOB_ACCESS_TOKEN_KEY,
   );
-  const url = `${mobile_siteConfig.BASE_URL}${mobile_siteConfig.PHOTOGRAPHER_ENDPOINTS.PHOTOS_UPLOAD}`;
+  const url = `${mobile_siteConfig.BASE_URL}${urlPath}`;
   const formData = new FormData();
-  const uploadUri = normalizeUploadUri(photoUri);
-  const filename = uploadUri.split('/').pop() || 'photo.jpg';
-  const lower = filename.toLowerCase();
-  const mime = lower.endsWith('.png')
-    ? 'image/png'
-    : lower.endsWith('.webp')
-      ? 'image/webp'
-      : 'image/jpeg';
-  formData.append('photo', {
-    uri: uploadUri,
-    type: mime,
-    name: filename,
-  } as unknown as Blob);
-  formData.append('studentId', studentId);
+  appendImageFile(formData, 'photo', photoUri);
+  formData.append('studentId', String(studentId));
   if (deviceInfo) {
-    formData.append('deviceInfo', deviceInfo);
+    formData.append('deviceInfo', String(deviceInfo));
   }
-  console.log('=== uploadPhoto formData ===', formData);
 
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 60000);
@@ -554,22 +632,45 @@ export async function uploadPhoto(
     body: formData,
     signal: controller.signal,
   });
-  console.log('=== uploadPhoto response ===', response);
   clearTimeout(timeoutId);
 
+  const data = await response.json().catch(() => ({}));
   if (!response.ok) {
-    const text = await response.text();
-    let errMessage = text || `Upload failed (${response.status})`;
-    try {
-      const json = JSON.parse(text);
-      if (json.message) errMessage = json.message;
-    } catch (_) {}
-    throw new Error(errMessage);
+    throw new Error(
+      (data as { message?: string; error?: string })?.message ||
+        (data as { message?: string; error?: string })?.error ||
+        response.statusText ||
+        'Upload failed',
+    );
   }
-  const contentType = response.headers.get('content-type');
-  if (contentType && contentType.includes('application/json')) {
-    return response.json();
-  }
-  return response.text();
+  return data;
+}
+
+/** School photo upload – POST api/school/photos/upload */
+export async function uploadPhoto(
+  photoUri: string,
+  studentId: string,
+  deviceInfo: string = Platform.OS,
+) {
+  return postPhotoUpload(
+    mobile_siteConfig.SCHOOL_ENDPOINTS.PHOTOS_UPLOAD,
+    studentId,
+    photoUri,
+    deviceInfo,
+  );
+}
+
+/** Photographer photo upload – POST api/photographer/photos/upload */
+export async function uploadStudentPhoto(
+  studentId: string,
+  file: string,
+  deviceInfo: string = Platform.OS,
+) {
+  return postPhotoUpload(
+    mobile_siteConfig.PHOTOGRAPHER_ENDPOINTS.PHOTOS_UPLOAD,
+    studentId,
+    file,
+    deviceInfo,
+  );
 }
 

@@ -16,9 +16,17 @@ import {
   rejectSchoolCorrection,
   updateSchoolStudent,
   createSchoolStudent,
+  createPhotographerStudent as createPhotographerStudentApi,
   uploadPhoto,
+  getAssignedSchools,
+  getClassesBySchool,
+  getTemplatesStatus,
+  getPhotographerStudentDetail,
+  getPhotographerPreview,
+  updatePhotographerStudent as updatePhotographerStudentApi,
 } from './mobile-api';
 import { mobile_siteConfig } from './mobile-siteConfig';
+import type { ApiPreviewResponse, ApiPreviewStudent, ApiTemplate } from '../types/preview';
 
 const TOKEN_KEY = '@school_app_token';
 
@@ -74,11 +82,11 @@ import type {
   StudentCreatePayload,
   StudentStatus,
   StudentUpdatePayload,
+  PhotographerSchool,
 } from '../types';
 import {
-  extractTemplateDataFields,
+  extractFieldKeysFromPreviewTemplate,
   getAddStudentFieldKeys,
-  mergeTemplateFieldKeys,
 } from '../utils/cardFields';
 import { sortClassItems } from '../utils/classSort';
 
@@ -204,6 +212,179 @@ export async function fetchClasses(): Promise<ClassItem[]> {
   }
 }
 
+type ApiPhotographerSchool = {
+  _id?: string;
+  id?: string;
+  schoolName?: string;
+  name?: string;
+  schoolCode?: string;
+  code?: string;
+  address?: string;
+  [key: string]: unknown;
+};
+
+type ApiPhotographerClass = {
+  _id?: string;
+  id?: string;
+  className?: string;
+  name?: string;
+  section?: string;
+  studentCount?: number;
+  studentsCount?: number;
+  [key: string]: unknown;
+};
+
+type ApiTemplateStudent = {
+  _id?: string;
+  id?: string;
+  studentId?: string | { _id?: string; id?: string };
+  schoolId?: string | { _id?: string; schoolName?: string; dimension?: { width?: number; height?: number } };
+  classId?: string | { _id?: string; className?: string; section?: string };
+  school?: { _id?: string; schoolName?: string; dimension?: { width?: number; height?: number } };
+  class?: { _id?: string; className?: string; section?: string };
+  rollNo?: string;
+  studentName?: string;
+  name?: string;
+  admissionNo?: string;
+  mobile?: string;
+  address?: string;
+  photoNo?: string;
+  photoUrl?: string;
+  status?: string;
+  hasTemplate?: boolean;
+  uniqueCode?: string;
+  dob?: string;
+  extraFields?: Record<string, unknown>;
+  template?: {
+    templateId?: string;
+    frontImage?: string;
+    backImage?: string;
+    elements?: ApiTemplate['elements'];
+    backElements?: ApiTemplate['backElements'];
+    card?: Record<string, unknown>;
+    [key: string]: unknown;
+  };
+  card?: Record<string, unknown>;
+  [key: string]: unknown;
+};
+
+function unwrapArray<T>(payload: unknown, keys: string[]): T[] {
+  if (Array.isArray(payload)) return payload as T[];
+  if (!payload || typeof payload !== 'object') return [];
+  const record = payload as Record<string, unknown>;
+  for (const key of keys) {
+    if (Array.isArray(record[key])) return record[key] as T[];
+  }
+  const data = record.data;
+  if (data && typeof data === 'object' && !Array.isArray(data)) {
+    const nested = data as Record<string, unknown>;
+    for (const key of keys) {
+      if (Array.isArray(nested[key])) return nested[key] as T[];
+    }
+  }
+  if (Array.isArray(data)) return data as T[];
+  return [];
+}
+
+function mapPhotographerSchool(item: ApiPhotographerSchool): PhotographerSchool {
+  return {
+    id: item._id ?? item.id ?? '',
+    name: item.schoolName ?? item.name ?? 'Unnamed School',
+    code: item.schoolCode ?? item.code,
+    address: item.address,
+  };
+}
+
+function mapPhotographerClass(item: ApiPhotographerClass, schoolId: string): ClassItem {
+  const className = item.className ?? item.name ?? 'Class';
+  return {
+    id: item._id ?? item.id ?? '',
+    schoolId,
+    name: item.section ? `${className} - ${item.section}` : className,
+    studentCount: item.studentCount ?? item.studentsCount,
+  };
+}
+
+function resolvePhotographerListStudentId(item: ApiTemplateStudent): string {
+  if (typeof item.studentId === 'string' && item.studentId.trim()) {
+    return item.studentId.trim();
+  }
+  if (item.studentId && typeof item.studentId === 'object') {
+    const sid = item.studentId as { _id?: string; id?: string };
+    if (typeof sid._id === 'string' && sid._id.trim()) return sid._id.trim();
+    if (typeof sid.id === 'string' && sid.id.trim()) return sid.id.trim();
+  }
+  if (typeof item._id === 'string' && item._id.trim()) return item._id.trim();
+  if (typeof item.id === 'string' && item.id.trim()) return item.id.trim();
+  return '';
+}
+
+function mapApiToSavedStudent(
+  item: ApiTemplateStudent,
+  schoolId: string,
+  classId: string,
+): Student {
+  const record = item as Record<string, unknown>;
+  const schoolObj =
+    (item.schoolId && typeof item.schoolId === 'object' ? item.schoolId : null) ??
+    (item.school && typeof item.school === 'object' ? item.school : null);
+  const classObj =
+    (item.classId && typeof item.classId === 'object' ? item.classId : null) ??
+    (item.class && typeof item.class === 'object' ? item.class : null);
+  const cardRaw = item.card ?? item.template?.card;
+  const previewData = buildPreviewDataFromListItem(item, classId, schoolId);
+  return {
+    id: resolvePhotographerListStudentId(item),
+    name: item.studentName ?? item.name ?? 'Unnamed Student',
+    admissionNo: item.admissionNo,
+    mobile: item.mobile,
+    address: item.address,
+    photoNo: item.photoNo,
+    rollNo: item.rollNo ?? '',
+    className: classObj
+      ? `${classObj.className ?? ''}${classObj.section ? ` - ${classObj.section}` : ''}`.trim()
+      : '',
+    classId: classObj?._id ?? classId,
+    sectionName: classObj?.section,
+    sectionId: classObj?._id,
+    schoolId: schoolObj?._id ?? (typeof item.schoolId === 'string' ? item.schoolId : schoolId),
+    schoolName: schoolObj?.schoolName ?? '',
+    status: mapApiStatus(item.status ?? 'pending'),
+    card: normalizeCardFields(cardRaw),
+    cardTemplate: normalizeCardTemplate(cardRaw),
+    photoUri: getFullPhotoUrl(resolveStudentPhotoUrl(record)),
+    previewData,
+  };
+}
+
+export async function fetchPhotographerAssignedSchools(): Promise<PhotographerSchool[]> {
+  const data = await getAssignedSchools();
+  return unwrapArray<ApiPhotographerSchool>(data, ['schools', 'assignedSchools', 'items', 'results'])
+    .map(mapPhotographerSchool)
+    .filter((school) => school.id);
+}
+
+export async function fetchPhotographerClasses(schoolId: string): Promise<ClassItem[]> {
+  const data = await getClassesBySchool(schoolId);
+  const classes = unwrapArray<ApiPhotographerClass>(data, ['classes', 'items', 'results'])
+    .map((item) => mapPhotographerClass(item, schoolId))
+    .filter((item) => item.id);
+  return sortClassItems(classes);
+}
+
+export async function fetchPhotographerStudents(
+  schoolId: string,
+  classId: string,
+): Promise<Student[]> {
+  const data = await getTemplatesStatus(schoolId, classId);
+  const list = unwrapArray<ApiTemplateStudent>(data, ['students', 'items', 'results']);
+  const withTemplates = list.filter((s) => s.hasTemplate && s.template?.templateId);
+  console.log('withTemplates Student List', withTemplates);
+  return withTemplates
+    .map((item) => mapApiToSavedStudent(item, schoolId, classId))
+    .filter((student) => student.id);
+}
+
 type ApiStudent = {
   _id: string;
   schoolId: string;
@@ -291,6 +472,39 @@ export async function searchStudentsGlobal(query: string): Promise<Student[]> {
         (s.photoNo ?? '').includes(q),
     );
   }
+}
+
+function matchesStudentSearch(student: Student, query: string): boolean {
+  const q = query.trim();
+  const lower = q.toLowerCase();
+  return (
+    student.name.toLowerCase().includes(lower) ||
+    (student.mobile ?? '').includes(q) ||
+    (student.photoNo ?? '').includes(q) ||
+    (student.rollNo ?? '').toLowerCase().includes(lower) ||
+    (student.admissionNo ?? '').toLowerCase().includes(lower)
+  );
+}
+
+/** Photographer school-scoped student search across assigned classes. */
+export async function searchPhotographerStudentsInSchool(
+  schoolId: string,
+  query: string,
+): Promise<Student[]> {
+  const q = query.trim();
+  if (!q) return [];
+  const classes = await fetchPhotographerClasses(schoolId);
+  const perClass = await Promise.all(
+    classes.map((cls) =>
+      fetchPhotographerStudents(schoolId, cls.id).catch(() => [] as Student[]),
+    ),
+  );
+  const seen = new Set<string>();
+  return perClass.flat().filter((student) => {
+    if (!student.id || seen.has(student.id)) return false;
+    seen.add(student.id);
+    return matchesStudentSearch(student, q);
+  });
 }
 
 export async function fetchStudentsByClass(classId: string): Promise<Student[]> {
@@ -558,43 +772,363 @@ function extractCreatedStudentId(res: unknown): string | null {
   return null;
 }
 
+function resolveTemplateFromRecord(
+  root: Record<string, unknown>,
+  student?: Record<string, unknown>,
+): unknown {
+  const preview =
+    root.preview && typeof root.preview === 'object'
+      ? (root.preview as Record<string, unknown>)
+      : undefined;
+  return (
+    root.template ??
+    root.idCardTemplate ??
+    root.cardTemplate ??
+    student?.template ??
+    student?.idCardTemplate ??
+    preview?.template
+  );
+}
+
+function normalizeApiTemplate(template: unknown): ApiTemplate | undefined {
+  if (!template || typeof template !== 'object' || Array.isArray(template)) return undefined;
+  const t = template as Record<string, unknown>;
+  const id = String(t._id ?? t.templateId ?? t.id ?? '').trim();
+  const hasContent = !!(id || t.frontImage || t.backImage || Array.isArray(t.elements));
+  if (!hasContent) return undefined;
+  return {
+    ...(t as ApiTemplate),
+    _id: id || 'template',
+  };
+}
+
+function normalizePhotographerDetailResponse(raw: unknown): {
+  student?: ApiStudentDetail;
+  card?: Record<string, unknown>;
+  template?: unknown;
+  preview?: unknown;
+} {
+  if (!raw || typeof raw !== 'object') return {};
+  let record = raw as Record<string, unknown>;
+
+  const inner = record.data;
+  if (inner && typeof inner === 'object' && !Array.isArray(inner)) {
+    const nested = inner as Record<string, unknown>;
+    if (nested.student || nested.template || nested._id || nested.studentName) {
+      record = nested;
+    }
+  }
+
+  if (record.student && typeof record.student === 'object') {
+    const studentRecord = record.student as Record<string, unknown>;
+    return {
+      student: record.student as ApiStudentDetail,
+      card: (record.card ?? studentRecord.card) as Record<string, unknown> | undefined,
+      template: resolveTemplateFromRecord(record, studentRecord),
+      preview: record.preview ?? studentRecord.preview,
+    };
+  }
+
+  if (record._id || record.id) {
+    const classObj = record.class ?? record.classId;
+    const schoolObj = record.school ?? record.schoolId;
+    const student: ApiStudentDetail = {
+      _id: String(record._id ?? record.id),
+      studentName: String(record.studentName ?? record.name ?? ''),
+      classId: classObj as ApiStudentDetail['classId'],
+      schoolId: schoolObj as ApiStudentDetail['schoolId'],
+      rollNo: record.rollNo as string | undefined,
+      mobile: record.mobile as string | undefined,
+      address: record.address as string | undefined,
+      admissionNo: (record.admissionNo as string | undefined) ?? '',
+      card: record.card as Record<string, unknown> | undefined,
+      uniqueCode: record.uniqueCode as string | undefined,
+      status: record.status as string | undefined,
+      correctionReason: record.correctionReason as string | undefined,
+      photoUrl: record.photoUrl as string | undefined,
+      extraFields: record.extraFields as Record<string, unknown> | undefined,
+      dob: record.dob as string | undefined,
+    };
+    return {
+      student,
+      card: record.card as Record<string, unknown> | undefined,
+      template: resolveTemplateFromRecord(record, record),
+      preview: record.preview,
+    };
+  }
+
+  return {};
+}
+
+function buildPreviewDataFromListItem(
+  item: ApiTemplateStudent,
+  classId: string,
+  schoolId: string,
+): ApiPreviewResponse | undefined {
+  const record = item as Record<string, unknown>;
+  const classObj =
+    (item.classId && typeof item.classId === 'object' ? item.classId : null) ??
+    (item.class && typeof item.class === 'object' ? item.class : null);
+  const schoolObj =
+    (item.schoolId && typeof item.schoolId === 'object' ? item.schoolId : null) ??
+    (item.school && typeof item.school === 'object' ? item.school : null);
+  const studentId = resolvePhotographerListStudentId(item);
+  if (!studentId) return undefined;
+
+  const template = normalizeApiTemplate(item.template);
+  if (!template) return undefined;
+
+  const cardRaw = item.card ?? item.template?.card;
+  const detail: ApiStudentDetail = {
+    _id: studentId,
+    studentName: item.studentName ?? item.name ?? '',
+    classId: (classObj ?? item.classId ?? classId) as ApiStudentDetail['classId'],
+    schoolId: (schoolObj ?? item.schoolId ?? schoolId) as ApiStudentDetail['schoolId'],
+    rollNo: item.rollNo,
+    mobile: item.mobile,
+    address: item.address,
+    admissionNo: item.admissionNo ?? '',
+    card: cardRaw as Record<string, unknown> | undefined,
+    uniqueCode: item.uniqueCode,
+    status: item.status,
+    photoUrl: item.photoUrl,
+    extraFields: item.extraFields,
+    dob: item.dob,
+  };
+
+  return buildPreviewDataFromDetail({
+    student: detail,
+    card: cardRaw as Record<string, unknown> | undefined,
+    template,
+  });
+}
+
+function buildPreviewDataFromDetail(res: {
+  student?: ApiStudentDetail;
+  card?: Record<string, unknown>;
+  template?: unknown;
+  preview?: unknown;
+}): ApiPreviewResponse | undefined {
+  const s = res?.student;
+  const template = normalizeApiTemplate(res?.template);
+  if (!s || !template) return undefined;
+
+  const card = res.card ?? s.card;
+  const cardFields =
+    card && typeof card === 'object' && !Array.isArray(card)
+      ? Object.fromEntries(
+          Object.entries(card as Record<string, unknown>)
+            .filter(([, v]) => v !== null && v !== undefined && String(v).trim() !== '')
+            .map(([k, v]) => [k, String(v)]),
+        )
+      : {};
+
+  const existingExtra =
+    s.extraFields && typeof s.extraFields === 'object' && !Array.isArray(s.extraFields)
+      ? (s.extraFields as Record<string, unknown>)
+      : {};
+
+  const sRecord = s as Record<string, unknown>;
+  const schoolIdObj =
+    (s.schoolId && typeof s.schoolId === 'object' ? s.schoolId : null) ??
+    (sRecord.school && typeof sRecord.school === 'object' ? sRecord.school : null);
+  const classIdObj =
+    (s.classId && typeof s.classId === 'object' ? s.classId : null) ??
+    (sRecord.class && typeof sRecord.class === 'object' ? sRecord.class : null);
+
+  const previewStudent: ApiPreviewStudent = {
+    _id: s._id,
+    studentName: s.studentName,
+    schoolId: s.schoolId,
+    classId: s.classId,
+    class: classIdObj
+      ? {
+          _id: (classIdObj as { _id?: string })._id,
+          className: (classIdObj as { className?: string }).className,
+          section: (classIdObj as { section?: string }).section,
+        }
+      : undefined,
+    school: schoolIdObj
+      ? {
+          _id: (schoolIdObj as { _id?: string })._id,
+          schoolName: (schoolIdObj as { schoolName?: string }).schoolName,
+          dimension: (schoolIdObj as { dimension?: { width?: number; height?: number } }).dimension,
+          dimensionUnit: (schoolIdObj as { dimensionUnit?: string }).dimensionUnit,
+        }
+      : undefined,
+    uniqueCode: s.uniqueCode,
+    mobile: getPreferredStudentMobile(s),
+    address: s.address,
+    admissionNo: s.admissionNo,
+    dob: typeof s.dob === 'string' ? s.dob : undefined,
+    status: s.status,
+    photoUrl: resolveStudentPhotoUrl(sRecord) ?? s.photoUrl,
+    colorCodePhotoUrl:
+      typeof s.colorCodePhotoUrl === 'string'
+        ? s.colorCodePhotoUrl
+        : typeof sRecord.colorCodePhoto === 'string'
+          ? (sRecord.colorCodePhoto as string)
+          : undefined,
+    extraFields: { ...cardFields, ...existingExtra },
+  };
+
+  for (const [key, value] of Object.entries(cardFields)) {
+    if (previewStudent[key] === undefined) {
+      previewStudent[key] = value;
+    }
+  }
+
+  return {
+    student: previewStudent,
+    template,
+    preview:
+      res.preview && typeof res.preview === 'object'
+        ? (res.preview as ApiPreviewResponse['preview'])
+        : undefined,
+  };
+}
+
+function normalizePhotographerPreviewResponse(raw: unknown): ApiPreviewResponse | undefined {
+  const fromDetailShape = buildPreviewDataFromDetail(normalizePhotographerDetailResponse(raw));
+  if (fromDetailShape) return fromDetailShape;
+
+  if (!raw || typeof raw !== 'object') return undefined;
+  const record = raw as Record<string, unknown>;
+  const root =
+    record.data && typeof record.data === 'object' && !Array.isArray(record.data)
+      ? (record.data as Record<string, unknown>)
+      : record;
+
+  if (root.student && root.template) {
+    return buildPreviewDataFromDetail({
+      student: root.student as ApiStudentDetail,
+      template: root.template,
+      card: root.card as Record<string, unknown> | undefined,
+      preview: root.preview,
+    });
+  }
+
+  const maybeStudent = root.student as ApiPreviewStudent | undefined;
+  const maybeTemplate = normalizeApiTemplate(root.template);
+  if (maybeStudent && maybeTemplate) {
+    return {
+      student: maybeStudent,
+      template: maybeTemplate,
+      preview:
+        root.preview && typeof root.preview === 'object'
+          ? (root.preview as ApiPreviewResponse['preview'])
+          : undefined,
+    };
+  }
+
+  return undefined;
+}
+
+export async function fetchPhotographerPreview(studentId: string): Promise<ApiPreviewResponse> {
+  console.log('=== fetchPhotographerPreview start ===', { studentId });
+  try {
+    const raw = await getPhotographerPreview(studentId);
+    console.log('=== fetchPhotographerPreview raw ===', raw);
+    const preview = normalizePhotographerPreviewResponse(raw);
+    console.log('=== fetchPhotographerPreview normalized ===', {
+      hasStudent: !!preview?.student,
+      hasTemplate: !!preview?.template,
+      studentId: preview?.student?._id,
+      templateId: preview?.template?._id,
+    });
+    if (preview?.student && preview?.template) {
+      return preview;
+    }
+    console.log('=== fetchPhotographerPreview error ===', 'Preview not found in API response');
+    throw new Error('Preview not found');
+  } catch (previewError) {
+    console.log('=== fetchPhotographerPreview API failed ===', previewError);
+    try {
+      console.log('=== fetchPhotographerPreview fallback ===', 'Trying student detail API');
+      const detail = await fetchPhotographerStudentDetail(studentId);
+      if (detail?.previewData?.student && detail?.previewData?.template) {
+        console.log('=== fetchPhotographerPreview fallback success ===', {
+          studentId: detail.previewData.student?._id,
+          templateId: detail.previewData.template?._id,
+        });
+        return detail.previewData;
+      }
+      console.log('=== fetchPhotographerPreview fallback ===', 'No previewData in student detail');
+    } catch (fallbackError) {
+      console.log('=== fetchPhotographerPreview fallback failed ===', fallbackError);
+    }
+    throw previewError;
+  }
+}
+
+function mapStudentDetailResponse(res: {
+  student?: ApiStudentDetail;
+  card?: Record<string, unknown>;
+}): Student | null {
+  const s = res?.student;
+  if (!s) return null;
+  const sRecord = s as Record<string, unknown>;
+  const cardRaw = res?.card ?? s.card;
+  const card = normalizeCardFields(cardRaw);
+  const cardTemplate = normalizeCardTemplate(cardRaw);
+  const schoolIdObj =
+    (s.schoolId && typeof s.schoolId === 'object' ? s.schoolId : null) ??
+    (sRecord.school && typeof sRecord.school === 'object'
+      ? (sRecord.school as { _id: string; schoolName?: string })
+      : null);
+  const classIdObj =
+    (s.classId && typeof s.classId === 'object' ? s.classId : null) ??
+    (sRecord.class && typeof sRecord.class === 'object'
+      ? (sRecord.class as { _id: string; className?: string; section?: string })
+      : null);
+  return {
+    id: s._id,
+    name: s.studentName,
+    card,
+    cardTemplate,
+    uniqueCode: s.uniqueCode,
+    mobile: getPreferredStudentMobile(s),
+    admissionNo: s.admissionNo,
+    address: s.address,
+    rollNo: s.rollNo ?? '',
+    className: classIdObj ? `${classIdObj.className}${classIdObj.section ? ' - ' + classIdObj.section : ''}` : '',
+    classId: classIdObj ? classIdObj._id : (s.classId as string),
+    sectionName: classIdObj?.section,
+    sectionId: classIdObj?._id,
+    schoolId: schoolIdObj ? schoolIdObj._id : (s.schoolId as string),
+    schoolName: schoolIdObj ? (schoolIdObj.schoolName ?? '') : '',
+    status: mapApiStatus(s.status ?? 'pending'),
+    correctionReason: s.correctionReason,
+    photoUri: getFullPhotoUrl(resolveStudentPhotoUrl(s as Record<string, unknown>)),
+  };
+}
+
 export async function fetchStudentDetail(id: string): Promise<Student | null> {
-  // console.log("fetchStudentDetail id", id);
   try {
     const res = (await getSchoolStudentDetail(id)) as {
       student?: ApiStudentDetail;
       card?: Record<string, unknown>;
     };
-    const s = res?.student;
-    if (!s) return null;
-    const cardRaw = res?.card ?? s.card;
-    const card = normalizeCardFields(cardRaw);
-    const cardTemplate = normalizeCardTemplate(cardRaw);
-    const schoolIdObj = s.schoolId && typeof s.schoolId === 'object' ? s.schoolId : null;
-    const classIdObj = s.classId && typeof s.classId === 'object' ? s.classId : null;
-    return {
-      id: s._id,
-      name: s.studentName,
-      card: card,
-      cardTemplate: cardTemplate,
-      uniqueCode: s.uniqueCode,
-      mobile: getPreferredStudentMobile(s),
-      admissionNo:s.admissionNo,
-      address: s.address,
-      rollNo: s.rollNo ?? '',
-      className: classIdObj ? `${classIdObj.className}${classIdObj.section ? ' - ' + classIdObj.section : ''}` : '',
-      classId: classIdObj ? classIdObj._id : (s.classId as string),
-      sectionName: classIdObj?.section,
-      sectionId: classIdObj?._id,
-      schoolId: schoolIdObj ? schoolIdObj._id : (s.schoolId as string),
-      schoolName: schoolIdObj ? schoolIdObj.schoolName : '',
-      status: mapApiStatus(s.status ?? 'pending'),
-      correctionReason: s.correctionReason,
-      photoUri: getFullPhotoUrl(resolveStudentPhotoUrl(s as Record<string, unknown>)),
-    };
+    return mapStudentDetailResponse(res);
   } catch {
     ensureMockData();
     return getMockStudents().find((s) => s.id === id) ?? null;
+  }
+}
+
+export async function fetchPhotographerStudentDetail(id: string): Promise<Student | null> {
+  try {
+    const raw = await getPhotographerStudentDetail(id);
+    const res = normalizePhotographerDetailResponse(raw);
+    const student = mapStudentDetailResponse(res);
+    if (!student) return null;
+    const previewData = buildPreviewDataFromDetail(res);
+    if (previewData) {
+      student.previewData = previewData;
+    }
+    return student;
+  } catch {
+    return null;
   }
 }
 
@@ -629,16 +1163,18 @@ export async function rejectPreview(studentId: string, comment: string): Promise
 export async function resolveAddStudentFieldKeys(
   students: Student[],
 ): Promise<string[]> {
+  for (const student of students) {
+    const fromEmbedded = extractFieldKeysFromPreviewTemplate(student.previewData?.template);
+    if (fromEmbedded.length > 0) return fromEmbedded;
+  }
+
   const sampleId = students[0]?.id;
   if (sampleId) {
     try {
       const preview = (await getSchoolPreview(sampleId)) as {
         template?: ApiPreviewTemplate;
       };
-      const fromElements = mergeTemplateFieldKeys(
-        extractTemplateDataFields(preview?.template?.elements),
-        extractTemplateDataFields(preview?.template?.backElements),
-      );
+      const fromElements = extractFieldKeysFromPreviewTemplate(preview?.template);
       if (fromElements.length > 0) return fromElements;
     } catch {
       /* try detail card template */
@@ -646,6 +1182,10 @@ export async function resolveAddStudentFieldKeys(
 
     try {
       const detail = await fetchStudentDetail(sampleId);
+      const fromDetailTemplate = extractFieldKeysFromPreviewTemplate(
+        detail?.previewData?.template,
+      );
+      if (fromDetailTemplate.length > 0) return fromDetailTemplate;
       if (detail?.cardTemplate) return getAddStudentFieldKeys(detail.cardTemplate);
       if (detail?.card) return getAddStudentFieldKeys(detail.card);
     } catch {
@@ -662,6 +1202,49 @@ export async function resolveAddStudentFieldKeys(
   if (withCard?.card) return getAddStudentFieldKeys(withCard.card);
 
   return getAddStudentFieldKeys(undefined);
+}
+
+async function resolveFieldKeysFromTemplatesStatus(
+  schoolId: string,
+  classId: string,
+): Promise<string[]> {
+  const data = await getTemplatesStatus(schoolId, classId);
+  const list = unwrapArray<ApiTemplateStudent>(data, ['students', 'items', 'results']);
+  for (const item of list) {
+    const template = normalizeApiTemplate(item.template);
+    const keys = extractFieldKeysFromPreviewTemplate(template);
+    if (keys.length > 0) return keys;
+  }
+  return [];
+}
+
+/** Photographer add-student fields — only ID card template elements (same as Preview screen). */
+export async function resolvePhotographerAddStudentFieldKeys(
+  schoolId: string,
+  classId: string,
+): Promise<string[]> {
+  const classStudents = await fetchPhotographerStudents(schoolId, classId);
+
+  for (const student of classStudents) {
+    const keys = extractFieldKeysFromPreviewTemplate(student.previewData?.template);
+    if (keys.length > 0) return keys;
+  }
+
+  const fromStatus = await resolveFieldKeysFromTemplatesStatus(schoolId, classId);
+  if (fromStatus.length > 0) return fromStatus;
+
+  const sampleId = classStudents[0]?.id;
+  if (sampleId) {
+    try {
+      const detail = await fetchPhotographerStudentDetail(sampleId);
+      const keys = extractFieldKeysFromPreviewTemplate(detail?.previewData?.template);
+      if (keys.length > 0) return keys;
+    } catch {
+      /* no template sample */
+    }
+  }
+
+  return [];
 }
 
 /** Create student – POST api/school/students, persist extraFields via PUT, then upload photo. */
@@ -723,12 +1306,58 @@ export async function updateStudent(
   payload: StudentUpdatePayload,
 ): Promise<void> {
   try {
-    const res = await updateSchoolStudent(studentId, payload);
+    const res = await updateSchoolStudent(studentId, payload as unknown as Record<string, unknown>);
     const data = res && typeof res === 'object' && 'data' in res ? (res as { data: unknown }).data : res;
     console.log('[updateStudent] API response:', JSON.stringify(data ?? res, null, 2));
   } catch (e) {
     console.log('[updateStudent] API error:', e);
     throw e instanceof Error ? e : new Error('Failed to update student');
+  }
+}
+
+/** Create student – POST api/photographer/students multipart/form-data (photo + housePhoto in same request). */
+export async function createPhotographerStudent(payload: StudentCreatePayload): Promise<void> {
+  const { photoUri, housePhotoUri, schoolId, ...createBody } = payload;
+  if (!schoolId) {
+    throw new Error('School is required.');
+  }
+
+  try {
+    const res = await createPhotographerStudentApi({
+      ...createBody,
+      schoolId,
+      photoUri,
+      housePhotoUri,
+    });
+    const data = res && typeof res === 'object' && 'data' in res ? (res as { data: unknown }).data : res;
+    console.log('[createPhotographerStudent] API response:', JSON.stringify(data ?? res, null, 2));
+  } catch (e) {
+    console.log('[createPhotographerStudent] API error:', e);
+    if (e instanceof Error && e.message && e.message !== 'Failed to add student') {
+      throw e;
+    }
+    const axiosErr = e as { response?: { data?: { message?: string; error?: string } } };
+    const msg = axiosErr.response?.data?.message || axiosErr.response?.data?.error;
+    throw new Error(typeof msg === 'string' ? msg : 'Failed to add student');
+  }
+}
+
+/** Update student – PUT api/photographer/students/:studentId */
+export async function updatePhotographerStudent(
+  studentId: string,
+  payload: StudentUpdatePayload,
+): Promise<void> {
+  try {
+    const res = await updatePhotographerStudentApi(
+      studentId,
+      payload as unknown as Record<string, unknown>,
+    );
+    console.log('[updatePhotographerStudent] API response:', JSON.stringify(res, null, 2));
+  } catch (e) {
+    console.log('[updatePhotographerStudent] API error:', e);
+    const axiosErr = e as { response?: { data?: { message?: string; error?: string } } };
+    const msg = axiosErr.response?.data?.message || axiosErr.response?.data?.error;
+    throw new Error(typeof msg === 'string' ? msg : 'Failed to update student');
   }
 }
 

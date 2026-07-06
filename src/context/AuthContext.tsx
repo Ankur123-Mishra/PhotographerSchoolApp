@@ -3,7 +3,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getStoredToken, setStoredToken, clearStoredToken } from '../Services/api';
 import { verifyOtp } from '../Services/mobile-api';
 import { mobile_siteConfig } from '../Services/mobile-siteConfig';
-import type { AuthUser } from '../types';
+import type { AuthRole, AuthUser } from '../types';
 
 const TOKEN_KEY = '@school_app_token';
 const USER_KEY = '@school_app_user';
@@ -16,7 +16,7 @@ interface AuthState {
 }
 
 interface AuthContextType extends AuthState {
-  login: (mobile: string, otp: string) => Promise<boolean>;
+  login: (mobile: string, otp: string, role?: AuthRole) => Promise<boolean>;
   logout: () => Promise<void>;
   setUser: (user: AuthUser | null) => void;
 }
@@ -58,14 +58,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return () => { cancelled = true; };
   }, []);
 
-  const login = useCallback(async (mobile: string, otp: string): Promise<boolean> => {
+  const login = useCallback(async (
+    mobile: string,
+    otp: string,
+    role: AuthRole = 'school',
+  ): Promise<boolean> => {
     const m = mobile.replace(/\D/g, '');
     if (m.length < 10) return false;
     if (otp.length < 4) return false;
     try {
-      const res = await verifyOtp(mobile, otp) as { token?: string; user?: AuthUser; message?: string };
+      const res = await verifyOtp(mobile, otp, role) as { token?: string; user?: AuthUser; message?: string };
+      console.log('res', res);``
       const token = res?.token;
-      const user = res?.user ?? { mobile: m };
+      const user = { ...(res?.user ?? { mobile: m }), role };
       if (!token) return false;
       await Promise.all([
         setStoredToken(token),
